@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
@@ -590,7 +591,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.thumb(
     val b = bounds ?: return
     val pad = 2f
     val s = minOf((w - pad * 2) / b.w.coerceAtLeast(1f), (h - pad * 2) / b.h.coerceAtLeast(1f))
-    androidx.compose.ui.graphics.drawscope.withTransform({
+    withTransform({
         translate(w / 2f, h / 2f)
         scale(s, s, Offset.Zero)
         translate(-b.cx, -b.cy)

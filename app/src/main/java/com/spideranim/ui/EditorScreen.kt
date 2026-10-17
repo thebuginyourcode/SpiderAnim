@@ -46,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -93,6 +95,7 @@ fun EditorScreen(ed: Editor) {
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Ui.Bar).windowInsetsPadding(WindowInsets.safeDrawing)) {
         val compact = maxWidth < 700.dp || maxHeight < 500.dp
+        val panelW = minOf(330.dp, maxWidth * 0.8f)
         val chrome = !ed.fullscreen
         Column(Modifier.fillMaxSize()) {
             if (chrome) TopBar(ed, compact)
@@ -107,7 +110,7 @@ fun EditorScreen(ed: Editor) {
                     // Phones: the panel slides over the canvas.
                     val page = ed.panel
                     if (compact && page != null && chrome) {
-                        RightPanel(ed, page, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(minOf(330.dp, maxWidth * 0.8f)))
+                        RightPanel(ed, page, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(panelW))
                     }
                 }
                 val page = ed.panel
@@ -367,14 +370,14 @@ private fun Preview(ed: Editor) {
             val s = minOf(size.width / p.width, size.height / p.height)
             val ox = (size.width - p.width * s) / 2
             val oy = (size.height - p.height * s) / 2
-            androidx.compose.ui.graphics.drawscope.withTransform({
+            withTransform({
                 translate(ox, oy)
                 scale(s, s, androidx.compose.ui.geometry.Offset.Zero)
             }) {
-                androidx.compose.ui.graphics.drawscope.clipRect(0f, 0f, p.width.toFloat(), p.height.toFloat()) {
+                clipRect(0f, 0f, p.width.toFloat(), p.height.toFloat()) {
                     if (ed.inSymbol) {
                         drawRect(Color(p.background), size = Size(p.width.toFloat(), p.height.toFloat()))
-                        androidx.compose.ui.graphics.drawscope.withTransform({ translate(p.width / 2f, p.height / 2f) }) { drawClip(p, ed.clip, ed.frame) }
+                        withTransform({ translate(p.width / 2f, p.height / 2f) }) { drawClip(p, ed.clip, ed.frame) }
                     } else {
                         drawSceneFrame(p, ed.frame)
                     }

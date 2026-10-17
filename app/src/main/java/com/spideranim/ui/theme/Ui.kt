@@ -8,41 +8,46 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+/** Colours sampled from ToonSquid's editor. */
 object Ui {
-    // Neutral greys; the artwork and the track colours carry the colour, not the chrome.
-    val Bg0 = Color(0xFF1C1D20) // workspace around the stage
-    val Bg1 = Color(0xFF26272B) // panels
-    val Bg2 = Color(0xFF303135) // controls
-    val Bg3 = Color(0xFF3B3C41) // pressed / selected controls
-    val Line = Color(0xFF38393E)
-    val Text = Color(0xFFF4F4F6)
-    val TextDim = Color(0xFFB3B5BC)
-    val TextFaint = Color(0xFF7A7C84)
-    val Accent = Color(0xFF2F8CFF)
-    val AccentSoft = Color(0x332F8CFF)
-    val OnionPrev = Color(0xFFFF5C7A)
-    val OnionNext = Color(0xFF34C77B)
+    val Bar = Color(0xFF232323)          // top bar, tool bars, panels
+    val Workspace = Color(0xFF141414)    // around the canvas
+    val Timeline = Color(0xFF1B1B1B)
+    val Header = Color(0xFF292929)       // layer name cells
+    val SubHeader = Color(0xFF2F2F2F)    // property name cells
+    val Track = Color(0xFF2E2E2E)        // a layer's main row
+    val SubTrack = Color(0xFF121212)     // property rows
+    val Selected = Color(0xFF3B4F57)     // selected layer / property header
+    val SelectedTrack = Color(0xFF2B434A)
+    val Teal = Color(0xFF6FB8C9)         // playhead, current frame
+    val TealButton = Color(0xFF4B7480)   // toggled buttons
+    val Pressed = Color(0xFF3A3A3A)      // selected tool
+    val Field = Color(0xFF333333)
+    val Line = Color(0xFF3A3A3A)
+    val Text = Color(0xFFE8E8E8)
+    val Dim = Color(0xFFA3A3A3)
+    val Faint = Color(0xFF6E6E6E)
+    val Red = Color(0xFFFF6B7F)
+    val OnionPrev = Color(0xFFFF5A5A)
+    val OnionNext = Color(0xFF4FCB7B)
 
-    val title = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Text, letterSpacing = 0.1.sp)
-    val body = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, color = Text)
-    val label = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, color = TextDim, letterSpacing = 0.3.sp)
-    val caps = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = TextFaint, letterSpacing = 1.2.sp)
-    val num = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Text, fontFeatureSettings = "tnum")
+    val menu = TextStyle(fontSize = 17.sp, color = Color(0xFFD6D6D6))
+    val body = TextStyle(fontSize = 15.sp, color = Text)
+    val small = TextStyle(fontSize = 13.sp, color = Dim)
+    val tiny = TextStyle(fontSize = 11.sp, color = Dim)
+    val title = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    val num = TextStyle(fontSize = 14.sp, color = Color(0xFFD0D0D0), fontFeatureSettings = "tnum")
 }
 
 @Composable
 fun SpiderTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Ui.Accent,
-            onPrimary = Color.White,
-            background = Ui.Bg0,
-            onBackground = Ui.Text,
-            surface = Ui.Bg1,
+            primary = Ui.Teal,
+            background = Ui.Workspace,
+            surface = Ui.Bar,
             onSurface = Ui.Text,
-            surfaceVariant = Ui.Bg2,
-            onSurfaceVariant = Ui.TextDim,
-            surfaceContainer = Ui.Bg2,
+            surfaceContainer = Color(0xFF2C2C2C),
             outline = Ui.Line,
         ),
         content = content,

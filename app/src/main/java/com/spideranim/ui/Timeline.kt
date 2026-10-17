@@ -1,31 +1,32 @@
 package com.spideranim.ui
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +36,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,493 +45,756 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import com.spideranim.editor.EditorState
+import com.spideranim.editor.Editor
+import com.spideranim.editor.Panel
+import com.spideranim.editor.Tool
 import com.spideranim.model.Layer
+import com.spideranim.model.LayerType
 import com.spideranim.model.Marker
 import com.spideranim.model.MarkerColors
+import com.spideranim.model.Prop
+import com.spideranim.model.clipBounds
+import com.spideranim.model.strokeBounds
 import com.spideranim.ui.icons.Ic
 import com.spideranim.ui.theme.Ui
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-private val RulerMarkers = 18.dp
-private val RulerNumbers = 24.dp
+private val MainRow = 48.dp
+private val PropRow = 30.dp
+private val RulerH = 32.dp
+private val MarkerH = 18.dp
+
+private sealed class TRow(val layer: Layer, val height: Dp) {
+    class Main(layer: Layer) : TRow(layer, MainRow)
+    class Property(layer: Layer, val prop: Prop) : TRow(layer, PropRow)
+}
+
+private fun rowsOf(layers: List<Layer>): List<TRow> =
+    layers.asReversed().flatMap { l -> listOf<TRow>(TRow.Main(l)) + l.animatedProps.map { TRow.Property(l, it) } }
 
 @Composable
-fun Timeline(state: EditorState, compact: Boolean, modifier: Modifier = Modifier) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
-    Column(modifier.floatingPanel().animateContentSize()) {
-        PlaybackBar(state, compact, expanded) { expanded = !expanded }
-        if (expanded) {
-            Hairline()
-            TimelineBody(
-                state,
-                cellW = if (compact) 15.dp else 18.dp,
-                rowH = 50.dp,
-                headerW = if (compact) 116.dp else 176.dp,
-                // Grows with layers up to four rows, then scrolls (as ToonSquid's does).
-                rowsShown = state.project.layers.size.coerceIn(1, if (compact) 2 else 4),
+fun Timeline(ed: Editor, compact: Boolean, onAddAudio: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.background(Ui.Timeline)) {
+        PlaybackBar(ed, compact)
+        if (ed.timelineOpen) {
+            TimelineGrid(ed, compact)
+            BottomBar(ed, compact, onAddAudio)
+        }
+    }
+}
+
+// ------------------------------------------------------------------ playback bar
+
+@Composable
+private fun PlaybackBar(ed: Editor, compact: Boolean) {
+    val b = if (compact) 40.dp else 46.dp
+    var fpsMenu by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth().height(if (compact) 46.dp else 54.dp).background(Ui.Bar).padding(horizontal = 6.dp)) {
+        Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically) {
+            BarButton(Ic.PrevFrame, { ed.step(-1) }, size = b, description = "Previous frame")
+            BarButton(Ic.NextFrame, { ed.step(1) }, size = b, description = "Next frame")
+            if (!compact) Spacer(Modifier.width(120.dp)) else Spacer(Modifier.width(4.dp))
+            BarButton(Ic.Onion, { ed.onion = !ed.onion }, selected = ed.onion, teal = true, size = b, description = "Onion skin")
+            if (!compact) BarButton(Ic.Loop, { ed.loop = !ed.loop }, selected = ed.loop, teal = true, size = b, description = "Loop")
+        }
+        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+            if (!compact) BarButton(Ic.Rewind, { ed.toStart() }, size = b, description = "Go to start")
+            BarButton(if (ed.playing) Ic.Pause else Ic.Play, { ed.togglePlay() }, size = b, iconSize = 28.dp, description = "Play")
+            if (!compact) BarButton(Ic.Forward, { ed.toEnd() }, size = b, description = "Go to end")
+        }
+        Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+            Breadcrumb(ed, compact)
+            Spacer(Modifier.width(if (compact) 8.dp else 24.dp))
+            Box {
+                Text(
+                    "${ed.project.fps} fps",
+                    style = Ui.menu.copy(fontSize = if (compact) 14.sp else 17.sp),
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { fpsMenu = true }.padding(6.dp),
+                )
+                ActionMenu(fpsMenu, { fpsMenu = false }, listOf(8, 12, 15, 24, 25, 30, 60).map { f -> "$f fps" to { ed.setFps(f) } })
+            }
+            Spacer(Modifier.width(if (compact) 4.dp else 120.dp))
+            BarButton(if (ed.timelineOpen) Ic.Collapse else Ic.Uncollapse, { ed.timelineOpen = !ed.timelineOpen }, size = b, description = "Collapse timeline")
+        }
+    }
+}
+
+/** "Scene 1" — or "Scene 1 › Mouth" while inside a symbol; tap a crumb to go back to it. */
+@Composable
+private fun Breadcrumb(ed: Editor, compact: Boolean) {
+    val crumbs = ed.crumbs
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        crumbs.forEachIndexed { i, c ->
+            if (i > 0) Text(" › ", style = Ui.menu.copy(fontSize = if (compact) 14.sp else 17.sp, color = Ui.Faint))
+            val last = i == crumbs.lastIndex
+            Text(
+                c.name,
+                style = Ui.menu.copy(fontSize = if (compact) 14.sp else 17.sp, color = if (last) Color(0xFFD6D6D6) else Ui.Teal),
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = !last) { ed.exitTo(i) }
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
             )
         }
     }
 }
 
-@Composable
-private fun PlaybackBar(state: EditorState, compact: Boolean, expanded: Boolean, onToggle: () -> Unit) {
-    val btn = if (compact) 34.dp else 38.dp
-    val p = state.project
-    Row(
-        Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (!compact) {
-            IconBtn(Ic.Plus, { state.addLayer() }, size = btn, description = "New layer")
-            IconBtn(Ic.Onion, { state.onion = !state.onion }, selected = state.onion, size = btn, description = "Onion skin")
-            IconBtn(Ic.Loop, { state.loop = !state.loop }, selected = state.loop, size = btn, description = "Loop")
-            Spacer(Modifier.weight(1f))
-        }
-        IconBtn(Ic.PrevFrame, { state.step(-1) }, size = btn, description = "Previous frame")
-        PlayButton(state.playing, { state.togglePlay() }, size = if (compact) 36.dp else 40.dp)
-        IconBtn(Ic.NextFrame, { state.step(1) }, size = btn, description = "Next frame")
-        Spacer(Modifier.width(8.dp))
-        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.width(if (compact) 58.dp else 72.dp)) {
-            Text("${state.frame + 1}", style = Ui.num.copy(fontSize = 17.sp, fontWeight = FontWeight.SemiBold))
-            Text(" / ${p.length}", style = Ui.num.copy(fontSize = 11.sp, color = Ui.TextFaint), modifier = Modifier.padding(bottom = 2.dp))
-        }
-        Spacer(Modifier.weight(1f))
-        if (compact) IconBtn(Ic.Onion, { state.onion = !state.onion }, selected = state.onion, size = btn, description = "Onion skin")
-        IconBtn(Ic.Marker, { state.addMarker() }, size = btn, description = "Add marker")
-        IconBtn(Ic.KeyAdd, { state.insertKeyframe() }, size = btn, description = "Add keyframe")
-        TimelineMenu(state, compact, btn)
-        IconBtn(if (expanded) Ic.ChevronDown else Ic.ChevronUp, onToggle, size = btn, description = "Collapse timeline")
-    }
-}
+// ------------------------------------------------------------------ grid
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TimelineMenu(state: EditorState, compact: Boolean, btn: Dp) {
-    var open by remember { mutableStateOf(false) }
-    val p = state.project
-    Box {
-        IconBtn(Ic.More, { open = true }, size = btn, description = "Timeline options")
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            val item: @Composable (String, () -> Unit) -> Unit = { label, action ->
-                DropdownMenuItem(text = { Text(label, style = Ui.body) }, onClick = { open = false; action() })
-            }
-            item("Remove keyframe") { state.deleteKeyframe() }
-            item("Remove frame pick") { state.removePick() }
-            if (compact) {
-                item("New layer") { state.addLayer() }
-                item(if (state.loop) "Loop: on" else "Loop: off") { state.loop = !state.loop }
-            }
-            listOf(12, 24, 30).forEach { f -> item("$f fps" + if (p.fps == f) "  ✓" else "") { state.setFps(f) } }
-            item("Add 12 frames (${p.length})") { state.setLength(p.length + 12) }
-            if (p.length > 12) item("Remove 12 frames") { state.setLength(p.length - 12) }
-        }
-    }
-}
-
-@Composable
-private fun TimelineBody(state: EditorState, cellW: Dp, rowH: Dp, headerW: Dp, rowsShown: Int) {
+private fun TimelineGrid(ed: Editor, compact: Boolean) {
     val density = LocalDensity.current
-    val cellPx = with(density) { cellW.toPx() }
-    val rowPx = with(density) { rowH.toPx() }
-    val markerPx = with(density) { RulerMarkers.toPx() }
+    val headerW = if (compact) 116.dp else 220.dp
+    var cellPx by remember { mutableFloatStateOf(with(density) { (if (compact) 34.dp else 50.dp).toPx() }) }
     var scrollX by remember { mutableFloatStateOf(0f) }
     var scrollY by remember { mutableFloatStateOf(0f) }
     var gridW by remember { mutableFloatStateOf(0f) }
     var gridH by remember { mutableFloatStateOf(0f) }
-    var editingMarker by remember { mutableStateOf<Marker?>(null) }
+    var markerEdit by remember { mutableStateOf<Marker?>(null) }
+    var drawingMenu by remember { mutableStateOf<Pair<Long, Int>?>(null) }
+    var layerMenu by remember { mutableStateOf<Layer?>(null) }
+    var renaming by remember { mutableStateOf<Layer?>(null) }
+    var rulerMenu by remember { mutableIntStateOf(-1) }
     val measurer = rememberTextMeasurer()
+    val cameraPainter = rememberVectorPainter(Ic.Camera)
 
-    fun maxX() = max(0f, (state.project.length + 6) * cellPx - gridW)
-    fun maxY() = max(0f, state.project.layers.size * rowPx - gridH)
+    val clip = ed.clip
+    val rows = rowsOf(clip.layers)
+    val rowPx = rows.map { with(density) { it.height.toPx() } }
+    val tops = rowPx.runningFold(0f) { a, b -> a + b }
+    val totalH = tops.last()
+    val cap = if (compact) 160.dp else 230.dp
+    val visibleH = with(density) { totalH.toDp() }.coerceIn(MainRow, cap)
+    val hasMarkers = clip.markers.isNotEmpty()
 
-    LaunchedEffect(state.frame, gridW) {
-        val x = state.frame * cellPx
-        if (gridW > 0 && (x < scrollX || x + cellPx > scrollX + gridW)) {
-            scrollX = (x - gridW * 0.25f).coerceIn(0f, maxX())
+    fun maxX() = max(0f, (ed.clip.length + 4) * cellPx - gridW)
+    fun maxY() = max(0f, totalH - gridH)
+    fun rowAt(y: Float): Int = tops.indexOfLast { it <= y }.coerceIn(0, (rows.size - 1).coerceAtLeast(0))
+
+    LaunchedEffect(ed.frame, gridW, cellPx) {
+        val x = ed.frame * cellPx
+        if (gridW > 0 && (x < scrollX || x + cellPx > scrollX + gridW)) scrollX = (x - gridW * 0.3f).coerceIn(0f, maxX())
+    }
+
+    // Thumbnail framing per layer: one scale for the whole layer so drawings line up frame to frame.
+    val layerBounds = remember(clip, ed.project) {
+        clip.layers.associate { l ->
+            l.id to when (l.type) {
+                LayerType.Drawing -> l.exposures.mapNotNull { strokeBounds(it.strokes) }.reduceOrNull { a, b -> a.union(b) }
+                LayerType.Symbol -> ed.project.clip(l.symbolId)?.let { s -> (0 until s.length).mapNotNull { ed.project.clipBounds(s, it) }.reduceOrNull { a, b -> a.union(b) } }
+                else -> null
+            }
         }
     }
 
-    val rows = state.project.layers.asReversed()
-
-    Column {
-        // ---- ruler: markers above frame numbers
-        Row(Modifier.height(RulerMarkers + RulerNumbers)) {
-            Box(Modifier.width(headerW).fillMaxHeight().padding(start = 14.dp, bottom = 5.dp), contentAlignment = Alignment.BottomStart) {
-                Text("LAYERS", style = Ui.caps)
+    // ---- ruler
+    Row(Modifier.fillMaxWidth().height(if (hasMarkers) RulerH + MarkerH else RulerH)) {
+        Box(Modifier.width(headerW).fillMaxHeight().background(Ui.Timeline))
+        Canvas(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .pointerInput(ed, cellPx, hasMarkers) {
+                    val markerPx = if (hasMarkers) MarkerH.toPx() else 0f
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val f = ((down.position.x + scrollX) / cellPx).toInt()
+                        if (down.position.y < markerPx) {
+                            val m = ed.clip.markers.firstOrNull { f in it.from..it.to }
+                            if (m != null) {
+                                down.consume()
+                                markerEdit = m
+                                return@awaitEachGesture
+                            }
+                        }
+                        ed.stop()
+                        fun set(x: Float) = ed.seek(((x + scrollX) / cellPx).toInt())
+                        set(down.position.x)
+                        down.consume()
+                        val moved = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            drag(down.id) { set(it.position.x); it.consume() }
+                            true
+                        }
+                        if (moved == null) {
+                            // Held still: marker menu for this frame.
+                            rulerMenu = f.coerceIn(0, ed.clip.length - 1)
+                            drag(down.id) { it.consume() }
+                        }
+                    }
+                },
+        ) {
+            val sx = scrollX.coerceIn(0f, maxX())
+            val markerPx = if (hasMarkers) MarkerH.toPx() else 0f
+            val first = (sx / cellPx).toInt()
+            val last = ((sx + size.width) / cellPx).toInt() + 1
+            val len = ed.clip.length
+            // Markers above the numbers.
+            ed.clip.markers.forEach { m ->
+                val x0 = m.from * cellPx - sx + 1f
+                val x1 = (m.to + 1) * cellPx - sx - 1f
+                if (x1 < 0 || x0 > size.width) return@forEach
+                drawRoundRect(Color(m.color), Offset(x0, 2f), Size(x1 - x0, markerPx - 4f), CornerRadius(4.dp.toPx()))
+                val t = measurer.measure(m.comment, Ui.tiny.copy(color = Color(0xFF151515), fontWeight = FontWeight.SemiBold), maxLines = 1)
+                clipRect(x0, 0f, x1 - 2f, markerPx) { drawText(t, topLeft = Offset(x0 + 5.dp.toPx(), (markerPx - t.size.height) / 2)) }
             }
-            Canvas(
+            val step = when {
+                cellPx >= 26.dp.toPx() -> 1
+                cellPx >= 14.dp.toPx() -> 2
+                else -> 5
+            }
+            val numTop = markerPx
+            val numH = size.height - markerPx
+            // Current frame cell, filled teal.
+            val cx = ed.frame * cellPx - sx
+            drawRect(Ui.Teal, Offset(cx, numTop), Size(cellPx, numH))
+            for (f in first..last) {
+                if (f >= len) break
+                val x = f * cellPx - sx
+                drawLine(Color(0xFF5A5A5A), Offset(x + cellPx, size.height - 6.dp.toPx()), Offset(x + cellPx, size.height), strokeWidth = 1.dp.toPx())
+                if ((f + 1) % step == 0 || f == 0 || f == ed.frame) {
+                    val cur = f == ed.frame
+                    val t = measurer.measure("${f + 1}", Ui.num.copy(fontSize = 13.sp, color = if (cur) Color(0xFF111111) else Color(0xFFCFCFCF), fontWeight = if (cur) FontWeight.SemiBold else FontWeight.Normal))
+                    drawText(t, topLeft = Offset(x + (cellPx - t.size.width) / 2, numTop + (numH - t.size.height) / 2 - 1.dp.toPx()))
+                }
+            }
+            drawLine(Ui.Teal, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f), strokeWidth = 1.5.dp.toPx())
+        }
+    }
+
+    // ---- rows
+    Row(Modifier.fillMaxWidth().height(visibleH)) {
+        Box(
+            Modifier
+                .width(headerW)
+                .fillMaxHeight()
+                .clipToBounds()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { c, dy ->
+                        c.consume()
+                        scrollY = (scrollY - dy).coerceIn(0f, maxY())
+                    }
+                },
+        ) {
+            Column(
                 Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .pointerInput(state, cellPx) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            val f = ((down.position.x + scrollX) / cellPx).toInt()
-                            if (down.position.y < markerPx) {
-                                val m = state.project.markers.firstOrNull { f in it.from..it.to }
-                                if (m != null) {
-                                    down.consume()
-                                    editingMarker = m
+                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                    .offset { IntOffset(0, -scrollY.coerceIn(0f, maxY()).roundToInt()) },
+            ) {
+                rows.forEach { r ->
+                    when (r) {
+                        is TRow.Main -> LayerHeader(ed, r.layer, compact, onLongPress = { layerMenu = r.layer })
+                        is TRow.Property -> PropHeader(ed, r.layer, r.prop)
+                    }
+                }
+            }
+        }
+        Canvas(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .onSizeChanged {
+                    gridW = it.width.toFloat()
+                    gridH = it.height.toFloat()
+                }
+                .pointerInput(ed, rows.size, cellPx) {
+                    val slop = viewConfiguration.touchSlop
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val y = down.position.y + scrollY
+                        val idx = if (rows.isEmpty() || y > totalH) -1 else rowAt(y)
+                        val row = rows.getOrNull(idx)
+                        fun frameAt(x: Float) = ((x + scrollX) / cellPx).toInt()
+                        val f0 = frameAt(down.position.x)
+                        val keyHit = (row as? TRow.Property)?.let { r -> ed.clip.layer(r.layer.id)?.track(r.prop)?.keyAt(f0) }
+                        val exposure = (row as? TRow.Main)?.let { r -> ed.clip.layer(r.layer.id)?.takeIf { it.type == LayerType.Drawing && !it.locked }?.exposureAt(f0) }
+                        // 0 undecided, 1 scroll, 2 drag key, 3 drag drawing, 4 pinch
+                        var mode = 0
+                        var total = Offset.Zero
+                        var at = f0
+                        val grabOffset = exposure?.let { f0 - it.start } ?: 0
+                        val snapshot = ed.project
+                        var pushed = false
+
+                        fun select() {
+                            if (row != null) ed.selectLayer(row.layer.id, (row as? TRow.Property)?.prop)
+                        }
+
+                        if (exposure != null) {
+                            // Long-press a drawing to move it; a still long-press opens its menu.
+                            val early = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val ch = ev.changes.firstOrNull { it.id == down.id }
+                                    if (ch == null || !ch.pressed) return@withTimeoutOrNull "up"
+                                    if (ev.changes.count { it.pressed } > 1) return@withTimeoutOrNull "multi"
+                                    total += ch.positionChange()
+                                    if (total.getDistance() > slop) return@withTimeoutOrNull "moved"
+                                }
+                                @Suppress("UNREACHABLE_CODE") ""
+                            }
+                            when (early) {
+                                null -> {
+                                    select()
+                                    ed.seek(f0)
+                                    mode = 3
+                                }
+                                "up" -> {
+                                    ed.stop()
+                                    select()
+                                    ed.seek(f0)
                                     return@awaitEachGesture
                                 }
-                            }
-                            state.playing = false
-                            fun set(x: Float) = state.seek(((x + scrollX) / cellPx).toInt())
-                            set(down.position.x)
-                            down.consume()
-                            drag(down.id) {
-                                set(it.position.x)
-                                it.consume()
+                                "multi" -> mode = 4
+                                else -> mode = 1
                             }
                         }
-                    },
-            ) {
-                val sx = scrollX.coerceIn(0f, maxX())
-                val first = (sx / cellPx).toInt()
-                val last = ((sx + size.width) / cellPx).toInt() + 1
-                val numTop = markerPx
-                val numH = size.height - markerPx
-
-                clipRect(0f, 0f, size.width, markerPx) {
-                    state.project.markers.forEach { m ->
-                        val x0 = m.from * cellPx - sx + 1.dp.toPx()
-                        val x1 = (m.to + 1) * cellPx - sx - 1.dp.toPx()
-                        if (x1 < 0 || x0 > size.width) return@forEach
-                        val top = 2.dp.toPx()
-                        val h = markerPx - 4.dp.toPx()
-                        drawRoundRect(Color(m.color), Offset(x0, top), Size(x1 - x0, h), CornerRadius(4.dp.toPx()))
-                        val label = measurer.measure(m.comment, Ui.label.copy(fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1)
-                        if (x1 - x0 > 14.dp.toPx()) {
-                            clipRect(x0, top, x1 - 3.dp.toPx(), top + h) {
-                                drawText(label, topLeft = Offset(x0 + 5.dp.toPx(), top + (h - label.size.height) / 2))
-                            }
-                        }
-                    }
-                }
-
-                val labelStyle = Ui.num.copy(fontSize = 10.sp, color = Ui.TextFaint)
-                for (f in first..last) {
-                    val x = f * cellPx - sx
-                    val n = f + 1
-                    if (f < state.project.length) {
-                        drawLine(Ui.Line, Offset(x, size.height - 4.dp.toPx()), Offset(x, size.height), strokeWidth = 1f)
-                    }
-                    if ((n == 1 || n % 5 == 0) && f != state.frame && f < state.project.length) {
-                        val layout = measurer.measure(n.toString(), labelStyle)
-                        drawText(layout, topLeft = Offset(x + cellPx / 2 - layout.size.width / 2f, numTop + (numH - layout.size.height) / 2 - 2.dp.toPx()))
-                    }
-                }
-                val px = state.frame * cellPx - sx + cellPx / 2
-                val layout = measurer.measure((state.frame + 1).toString(), Ui.num.copy(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.SemiBold))
-                val w = max(layout.size.width + 10.dp.toPx(), 22.dp.toPx())
-                val h = 18.dp.toPx()
-                val top = numTop + (numH - h) / 2 - 2.dp.toPx()
-                drawRoundRect(Ui.Accent, Offset(px - w / 2, top), Size(w, h), CornerRadius(h / 2))
-                drawText(layout, topLeft = Offset(px - layout.size.width / 2f, top + (h - layout.size.height) / 2))
-            }
-        }
-        Hairline()
-        // ---- layers
-        Row(Modifier.height(rowH * rowsShown)) {
-            Box(
-                Modifier
-                    .width(headerW)
-                    .fillMaxHeight()
-                    .clipToBounds()
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures { c, dy ->
-                            c.consume()
-                            scrollY = (scrollY - dy).coerceIn(0f, maxY())
-                        }
-                    },
-            ) {
-                Column(
-                    Modifier
-                        .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                        .offset { IntOffset(0, -scrollY.coerceIn(0f, maxY()).roundToInt()) },
-                ) {
-                    rows.forEach { layer -> LayerHeader(state, layer, rowH) }
-                }
-            }
-            Box(Modifier.width(1.dp).fillMaxHeight().background(Ui.Line))
-            Canvas(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .onSizeChanged {
-                        gridW = it.width.toFloat()
-                        gridH = it.height.toFloat()
-                    }
-                    .pointerInput(state, cellPx, rowPx) {
-                        val slop = viewConfiguration.touchSlop
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            val layers = state.project.layers.asReversed()
-                            val yIn = down.position.y + scrollY
-                            val layer = layers.getOrNull((yIn / rowPx).toInt())
-                            val inPickLane = (yIn % rowPx) > rowPx * 0.5f
-                            fun frameAt(x: Float) = ((x + scrollX) / cellPx).toInt()
-                            val f0 = frameAt(down.position.x)
-                            val key = layer?.keyAt(f0)?.takeIf { !inPickLane }
-                            val pick = layer?.pickAt(f0)?.takeIf { inPickLane }
-                            // 0 undecided, 1 scroll, 2 drag keyframe, 3 drag frame pick
-                            var mode = 0
-                            var total = Offset.Zero
-                            var at = f0
-                            val snapshot = state.project
-                            var pushed = false
-                            while (true) {
-                                val ev = awaitPointerEvent()
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!ch.pressed) {
-                                    if (mode == 0) {
-                                        state.playing = false
-                                        if (layer != null) state.selectLayer(layer.id)
-                                        state.seek(f0)
-                                    }
-                                    break
+                        var heldStill = mode == 3
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val pressed = ev.changes.filter { it.pressed }
+                            if (pressed.isEmpty()) {
+                                if (mode == 0) {
+                                    ed.stop()
+                                    select()
+                                    ed.seek(f0)
                                 }
-                                val d = ch.positionChange()
-                                total += d
-                                if (mode == 0 && total.getDistance() > slop) {
-                                    mode = when {
-                                        layer == null || layer.locked -> 1
-                                        key != null -> 2
-                                        pick != null -> 3
-                                        else -> 1
-                                    }
-                                    if (mode >= 2) state.selectLayer(layer!!.id)
+                                if (mode == 3 && heldStill && row != null) drawingMenu = row.layer.id to f0
+                                break
+                            }
+                            if (pressed.size > 1) {
+                                mode = 4
+                                val z = ev.calculateZoom()
+                                cellPx = (cellPx * z).coerceIn(12.dp.toPx(), 120.dp.toPx())
+                                scrollX = scrollX.coerceIn(0f, maxX())
+                                ev.changes.forEach { it.consume() }
+                                continue
+                            }
+                            val ch = pressed.firstOrNull { it.id == down.id } ?: pressed[0]
+                            val d = ch.positionChange()
+                            total += d
+                            if (mode == 0 && total.getDistance() > slop) {
+                                mode = if (keyHit != null && row != null && !row.layer.locked) 2 else 1
+                                if (mode == 2) select()
+                            }
+                            when (mode) {
+                                1 -> {
+                                    scrollX = (scrollX - d.x).coerceIn(0f, maxX())
+                                    scrollY = (scrollY - d.y).coerceIn(0f, maxY())
                                 }
-                                when (mode) {
-                                    1 -> {
-                                        scrollX = (scrollX - d.x).coerceIn(0f, maxX())
-                                        scrollY = (scrollY - d.y).coerceIn(0f, maxY())
-                                        ch.consume()
+                                2 -> {
+                                    val r = row as TRow.Property
+                                    val nf = frameAt(ch.position.x).coerceAtLeast(0)
+                                    if (nf != at && ed.clip.layer(r.layer.id)?.track(r.prop)?.keyAt(nf) == null) {
+                                        if (!pushed) { ed.pushHistory(snapshot); pushed = true }
+                                        ed.moveKey(r.layer.id, r.prop, at, nf)
+                                        at = nf
+                                        ed.seek(nf)
                                     }
-                                    2, 3 -> {
-                                        val nf = frameAt(ch.position.x).coerceIn(0, state.project.length - 1)
-                                        val l = state.project.layer(layer!!.id)
-                                        val free = if (mode == 2) l?.keyAt(nf) == null else l?.pickAt(nf) == null
-                                        if (l != null && nf != at && free) {
-                                            if (!pushed) {
-                                                state.pushHistory(snapshot)
-                                                pushed = true
+                                }
+                                3 -> {
+                                    if (total.getDistance() > slop) heldStill = false
+                                    val nf = (frameAt(ch.position.x) - grabOffset).coerceAtLeast(0)
+                                    val e = exposure!!
+                                    val cur = ed.clip.layer(row!!.layer.id)?.exposures?.firstOrNull { it.id == e.id }
+                                    if (cur != null && nf != cur.start) {
+                                        if (!pushed) { ed.pushHistory(snapshot); pushed = true }
+                                        ed.moveExposure(row.layer.id, e.id, nf)
+                                        ed.seek(nf + grabOffset)
+                                    }
+                                }
+                            }
+                            ch.consume()
+                        }
+                    }
+                },
+        ) {
+            val sx = scrollX.coerceIn(0f, maxX())
+            val sy = scrollY.coerceIn(0f, maxY())
+            val len = ed.clip.length
+            val first = (sx / cellPx).toInt().coerceAtLeast(0)
+            val last = ((sx + size.width) / cellPx).toInt() + 1
+            val bg = Color(ed.project.background)
+            rows.forEachIndexed { i, r ->
+                val top = tops[i] - sy
+                val h = rowPx[i]
+                if (top > size.height || top + h < 0) return@forEachIndexed
+                val l = r.layer
+                val selected = ed.selLayerId == l.id && when (r) {
+                    is TRow.Main -> ed.selProp == null
+                    is TRow.Property -> ed.selProp == r.prop
+                }
+                when (r) {
+                    is TRow.Main -> {
+                        drawRect(Ui.Track, Offset(0f, top), Size(size.width, h))
+                        if (selected) drawLine(Ui.Teal, Offset(0f, top + 0.75f), Offset(size.width, top + 0.75f), strokeWidth = 1.5.dp.toPx())
+                        val pad = 4.dp.toPx()
+                        val cellTop = top + pad
+                        val cellH = h - pad * 2
+                        val dim = if (l.visible) 1f else 0.35f
+                        when (l.type) {
+                            LayerType.Drawing -> {
+                                val lb = layerBounds[l.id]
+                                for (e in l.exposures) {
+                                    if (e.end <= first || e.start > last) continue
+                                    val x0 = e.start * cellPx - sx + 1f
+                                    val x1 = e.end * cellPx - sx - 1f
+                                    drawRoundRect(Color(0xFF474747), Offset(x0, cellTop - 2f), Size(x1 - x0, cellH + 4f), CornerRadius(4.dp.toPx()))
+                                    for (f in max(e.start, first)..minOf(e.end - 1, last)) {
+                                        val cx = f * cellPx - sx
+                                        val inset = 3.dp.toPx()
+                                        val cw = cellPx - inset * 2
+                                        drawRect(bg.copy(alpha = 0.9f * dim), Offset(cx + inset, cellTop), Size(cw, cellH))
+                                        clipRect(cx + inset, cellTop, cx + inset + cw, cellTop + cellH) {
+                                            translate(cx + inset, cellTop) {
+                                                thumb(lb, cw, cellH) { e.strokes.forEach { drawMark(it, alpha = dim) } }
                                             }
-                                            if (mode == 2) state.moveKeyframe(l.id, at, nf) else state.movePick(l.id, at, nf)
-                                            at = nf
-                                            state.seek(nf)
                                         }
-                                        ch.consume()
+                                    }
+                                }
+                                // Empty frames show the transparency checker.
+                                for (f in first..minOf(last, len - 1)) {
+                                    if (l.exposureAt(f) != null) continue
+                                    checker(Offset(f * cellPx - sx + 3.dp.toPx(), cellTop), Size(cellPx - 6.dp.toPx(), cellH))
+                                }
+                            }
+                            LayerType.Symbol -> {
+                                val sym = ed.project.clip(l.symbolId)
+                                val lb = layerBounds[l.id]
+                                if (sym != null) for (f in first..minOf(last, len - 1)) {
+                                    val cx = f * cellPx - sx
+                                    val inset = 2.dp.toPx()
+                                    val cw = cellPx - inset * 2
+                                    drawRect(bg.copy(alpha = 0.9f * dim), Offset(cx + inset, cellTop), Size(cw, cellH))
+                                    clipRect(cx + inset, cellTop, cx + inset + cw, cellTop + cellH) {
+                                        translate(cx + inset, cellTop) {
+                                            thumb(lb, cw, cellH) { drawClip(ed.project, sym, ed.project.symbolFrame(l, f), RenderOptions(alpha = dim)) }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    },
-            ) {
-                val sx = scrollX.coerceIn(0f, maxX())
-                val sy = scrollY.coerceIn(0f, maxY())
-                val length = state.project.length
-                val first = (sx / cellPx).toInt()
-                val last = ((sx + size.width) / cellPx).toInt() + 1
-                for (f in first..last) {
-                    if ((f + 1) % 5 == 0 && f < length) {
-                        drawRect(Ui.Bg2.copy(alpha = 0.55f), Offset(f * cellPx - sx, 0f), Size(cellPx, size.height))
-                    }
-                }
-                // Timeline markers tint their frames faintly through every row.
-                state.project.markers.forEach { m ->
-                    drawRect(Color(m.color).copy(alpha = 0.06f), Offset(m.from * cellPx - sx, 0f), Size((m.to - m.from + 1) * cellPx, size.height))
-                }
-                val keyR = 5.dp.toPx()
-                val pickH = 18.dp.toPx()
-                val labelStyle = Ui.label.copy(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
-                rows.forEachIndexed { i, layer ->
-                    val top = i * rowPx - sy
-                    if (top > size.height || top + rowPx < 0) return@forEachIndexed
-                    val sel = layer.id == state.selectedLayerId
-                    if (sel) drawRect(Color(layer.color).copy(alpha = 0.08f), Offset(0f, top), Size(size.width, rowPx))
-                    drawLine(Ui.Line, Offset(0f, top + rowPx - 0.5f), Offset(size.width, top + rowPx - 0.5f), strokeWidth = 1f)
-                    val dim = if (layer.visible) 1f else 0.4f
-                    val trackColor = Color(layer.color)
-
-                    // Keyframe lane: diamonds joined by a line where they tween.
-                    val ky = top + rowPx * 0.27f
-                    val ks = layer.keyframes
-                    ks.forEachIndexed { k, kf ->
-                        val next = ks.getOrNull(k + 1) ?: return@forEachIndexed
-                        val x0 = kf.frame * cellPx - sx + cellPx / 2
-                        val x1 = next.frame * cellPx - sx + cellPx / 2
-                        if (kf.tween) drawLine(trackColor.copy(alpha = 0.7f * dim), Offset(x0, ky), Offset(x1, ky), strokeWidth = 2.dp.toPx())
-                    }
-                    ks.forEach { kf ->
-                        val c = Offset(kf.frame * cellPx - sx + cellPx / 2, ky)
-                        val diamond = Path().apply {
-                            moveTo(c.x, c.y - keyR); lineTo(c.x + keyR, c.y); lineTo(c.x, c.y + keyR); lineTo(c.x - keyR, c.y); close()
-                        }
-                        drawPath(diamond, (if (layer.locked) Ui.TextFaint else Color.White).copy(alpha = dim))
-                        if (sel && kf.frame == state.frame) {
-                            drawCircle(Ui.Accent, radius = keyR + 3.dp.toPx(), center = c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
-                        }
-                    }
-
-                    // Frame-picker lane: one block per pick, coloured and named by its drawing's marker.
-                    val sym = state.project.symbol(layer.symbolId)
-                    val py = top + rowPx * 0.52f
-                    val picks = layer.picks
-                    picks.forEachIndexed { k, pk ->
-                        val end = picks.getOrNull(k + 1)?.frame ?: length
-                        val x0 = pk.frame * cellPx - sx + 1.dp.toPx()
-                        val x1 = end * cellPx - sx - 1.dp.toPx()
-                        if (x1 < 0 || x0 > size.width || x1 <= x0) return@forEachIndexed
-                        val d = sym?.frames?.getOrNull(pk.drawing)
-                        val color = Color(d?.markerColor ?: MarkerColors[0])
-                        drawRoundRect(color.copy(alpha = 0.9f * dim), Offset(x0, py), Size(x1 - x0, pickH), CornerRadius(5.dp.toPx()))
-                        if (sel && pk.frame == state.frame) {
-                            drawRoundRect(Color.White, Offset(x0, py), Size(x1 - x0, pickH), CornerRadius(5.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
-                        }
-                        if (x1 - x0 > 10.dp.toPx() && d != null) {
-                            val text = measurer.measure(d.label(pk.drawing), labelStyle, maxLines = 1)
-                            clipRect(x0, py, x1 - 2.dp.toPx(), py + pickH) {
-                                drawText(text, topLeft = Offset(x0 + 5.dp.toPx(), py + (pickH - text.size.height) / 2))
+                            LayerType.Camera -> {
+                                for (f in first..minOf(last, len - 1)) {
+                                    val s = (cellH * 0.55f).coerceAtMost(cellPx * 0.6f)
+                                    translate(f * cellPx - sx + (cellPx - s) / 2, cellTop + (cellH - s) / 2) {
+                                        with(cameraPainter) { draw(Size(s, s), alpha = 0.55f, colorFilter = ColorFilter.tint(Color(0xFF9A9A9A))) }
+                                    }
+                                }
+                            }
+                            LayerType.Text -> {
+                                val x0 = -sx + 1f
+                                val x1 = len * cellPx - sx - 1f
+                                drawRoundRect(Color(0xFF474747), Offset(x0, cellTop), Size(x1 - x0, cellH), CornerRadius(4.dp.toPx()))
+                                val t = measurer.measure("T  ${l.text.lineSequence().first()}", Ui.small.copy(color = Ui.Text), maxLines = 1)
+                                drawText(t, topLeft = Offset(max(x0, 0f) + 8.dp.toPx(), cellTop + (cellH - t.size.height) / 2))
+                            }
+                            LayerType.Audio -> {
+                                val peaks = l.audio?.let { ed.audio.peaks[it] }
+                                val mid = top + h / 2
+                                if (peaks != null) {
+                                    val perPx = 100f / (ed.project.fps * cellPx)
+                                    var x = 0f
+                                    while (x < size.width) {
+                                        val i = ((x + sx) * perPx).toInt()
+                                        if (i >= peaks.size) break
+                                        val a = peaks[i] * (h / 2 - 4f)
+                                        drawLine(Color(0xFF7CC6D8).copy(alpha = dim), Offset(x, mid - a), Offset(x, mid + a), strokeWidth = 1.2f)
+                                        x += 1.5f
+                                    }
+                                } else {
+                                    drawLine(Color(0xFF7CC6D8).copy(alpha = 0.5f), Offset(0f, mid), Offset(size.width, mid), strokeWidth = 1f)
+                                }
                             }
                         }
                     }
+                    is TRow.Property -> {
+                        drawRect(if (selected) Ui.SelectedTrack else Ui.SubTrack, Offset(0f, top), Size(size.width, h))
+                        val t = l.track(r.prop) ?: return@forEachIndexed
+                        val kr = 6.dp.toPx()
+                        val cy = top + h / 2
+                        t.keys.forEach { k ->
+                            val c = Offset(k.frame * cellPx - sx + cellPx / 2, cy)
+                            if (c.x < -kr || c.x > size.width + kr) return@forEach
+                            val d = Path().apply { moveTo(c.x, c.y - kr); lineTo(c.x + kr, c.y); lineTo(c.x, c.y + kr); lineTo(c.x - kr, c.y); close() }
+                            drawPath(d, Color.White)
+                        }
+                    }
                 }
-                val endX = length * cellPx - sx
-                if (endX < size.width) drawRect(Ui.Bg0.copy(alpha = 0.5f), Offset(endX, 0f), Size(size.width - endX, size.height))
-                val px = state.frame * cellPx - sx + cellPx / 2
-                drawLine(Ui.Accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 1.5.dp.toPx())
+                drawLine(Ui.Timeline, Offset(0f, top + h - 0.5f), Offset(size.width, top + h - 0.5f), strokeWidth = 1f)
             }
+            // Past the end of the clip.
+            val endX = len * cellPx - sx
+            if (endX < size.width) drawRect(Color.Black.copy(alpha = 0.45f), Offset(endX, 0f), Size(size.width - endX, size.height))
+            // Current frame column, outlined in teal.
+            val px = ed.frame * cellPx - sx
+            drawRect(Ui.Teal, Offset(px, 0f), Size(cellPx, size.height), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
         }
     }
 
-    editingMarker?.let { m ->
-        MarkerDialog(state, m, onDismiss = { editingMarker = null })
+    markerEdit?.let { m -> MarkerDialog(ed, m) { markerEdit = null } }
+    if (rulerMenu >= 0) {
+        val f = rulerMenu
+        val existing = ed.clip.markers.firstOrNull { f in it.from..it.to }
+        ActionSheet("Frame ${f + 1}", { rulerMenu = -1 }, buildList {
+            if (existing == null) add("Add Marker" to { ed.addMarker(f) }) else add("Edit Marker" to { markerEdit = existing })
+        })
+    }
+    drawingMenu?.let { (layerId, f) ->
+        ActionSheet("Drawing", { drawingMenu = null }, listOf(
+            "Duplicate" to { ed.selectLayer(layerId); ed.seek(f); ed.addDrawing(copy = true) },
+            "Extend" to { ed.selectLayer(layerId); ed.seek(f); ed.extendDrawing() },
+            "Shorten" to { ed.selectLayer(layerId); ed.seek(f); ed.shortenDrawing() },
+            "Add Marker Here" to {
+                val e = ed.clip.layer(layerId)?.exposureAt(f)
+                if (e != null) ed.addMarker(e.start)
+            },
+            "Delete Drawing" to { ed.selectLayer(layerId); ed.seek(f); ed.deleteDrawing() },
+        ))
+    }
+    layerMenu?.let { l -> LayerMenu(ed, l, onRename = { renaming = l }) { layerMenu = null } }
+    renaming?.let { l ->
+        var name by remember(l.id) { mutableStateOf(l.name) }
+        AppDialog("Rename Layer", { renaming = null }, listOf("Cancel" to { renaming = null }, "Rename" to { ed.renameLayer(l.id, name); renaming = null })) {
+            TextInput(name, { name = it }, Modifier.fillMaxWidth())
+        }
     }
 }
 
+/** Scales [block] (drawn in content space) so [bounds] fits a w×h cell. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.thumb(
+    bounds: com.spideranim.model.Bounds?,
+    w: Float,
+    h: Float,
+    block: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit,
+) {
+    val b = bounds ?: return
+    val pad = 2f
+    val s = minOf((w - pad * 2) / b.w.coerceAtLeast(1f), (h - pad * 2) / b.h.coerceAtLeast(1f))
+    androidx.compose.ui.graphics.drawscope.withTransform({
+        translate(w / 2f, h / 2f)
+        scale(s, s, Offset.Zero)
+        translate(-b.cx, -b.cy)
+    }) { block() }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.checker(at: Offset, size: Size) {
+    drawRect(Color(0xFF3C3C3C), at, size)
+    val q = 5.dp.toPx()
+    clipRect(at.x, at.y, at.x + size.width, at.y + size.height) {
+        var y = 0
+        var yy = at.y
+        while (yy < at.y + size.height) {
+            var x = 0
+            var xx = at.x
+            while (xx < at.x + size.width) {
+                if ((x + y) % 2 == 0) drawRect(Color(0xFF4E4E4E), Offset(xx, yy), Size(q, q))
+                xx += q
+                x++
+            }
+            yy += q
+            y++
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LayerHeader(state: EditorState, layer: Layer, rowH: Dp) {
-    val sel = layer.id == state.selectedLayerId
-    val sym = state.project.symbol(layer.symbolId)
-    val drawingIndex = layer.drawingAt(state.frame)
-    val drawing = sym?.frames?.getOrNull(drawingIndex)
+private fun LayerHeader(ed: Editor, layer: Layer, compact: Boolean, onLongPress: () -> Unit) {
+    val selected = ed.selLayerId == layer.id && ed.selProp == null
     Row(
         Modifier
             .fillMaxWidth()
-            .height(rowH)
-            .background(if (sel) Color(layer.color).copy(alpha = 0.12f) else Color.Transparent)
-            .clickable { state.selectLayer(layer.id) }
-            .padding(start = 8.dp, end = 2.dp),
+            .height(MainRow)
+            .background(if (selected) Ui.Selected else Ui.Header)
+            .combinedClickable(onClick = { ed.selectLayer(layer.id) }, onLongClick = onLongPress, onDoubleClick = {
+                if (layer.type == LayerType.Symbol) ed.enterSymbol(layer.symbolId) else onLongPress()
+            })
+            .padding(start = if (compact) 10.dp else 18.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(4.dp).height(30.dp).clip(RoundedCornerShape(2.dp)).background(Color(layer.color).copy(alpha = if (sel) 1f else 0.6f)))
-        Spacer(Modifier.width(7.dp))
-        if (drawing != null) SymbolThumb(drawing, state.project.background, Modifier.size(34.dp))
-        Spacer(Modifier.width(7.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                layer.name,
-                style = Ui.body.copy(fontSize = 12.sp, color = if (!layer.visible) Ui.TextFaint else if (sel) Ui.Text else Ui.TextDim),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (drawing != null && sym != null && sym.frames.size > 1) {
-                Text(drawing.label(drawingIndex), style = Ui.label.copy(fontSize = 10.sp, color = Color(drawing.markerColor)), maxLines = 1)
+        if (layer.type == LayerType.Symbol) {
+            Icon(Ic.Symbol, null, tint = Ui.Dim, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            layer.name,
+            style = Ui.body.copy(fontSize = if (compact) 14.sp else 17.sp, color = if (layer.visible) Color.White else Ui.Faint),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (layer.locked) Icon(Ic.Lock, "Locked", tint = Ui.Dim, modifier = Modifier.size(16.dp))
+        val icon = if (layer.type == LayerType.Audio) (if (layer.visible) Ic.Speaker else Ic.Mute) else (if (layer.visible) Ic.Eye else Ic.EyeOff)
+        BarButton(icon, { ed.toggleVisible(layer.id) }, size = 38.dp, iconSize = 24.dp, tint = if (layer.visible) Color.White else Ui.Faint, description = "Visibility")
+    }
+}
+
+@Composable
+private fun PropHeader(ed: Editor, layer: Layer, prop: Prop) {
+    val selected = ed.selLayerId == layer.id && ed.selProp == prop
+    Row(Modifier.fillMaxWidth().height(PropRow).background(Ui.Timeline).padding(start = 18.dp)) {
+        Row(
+            Modifier
+                .fillMaxSize()
+                .background(if (selected) Ui.Selected else Ui.SubHeader)
+                .clickable { ed.selectLayer(layer.id, prop) }
+                .padding(start = 18.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(prop.label, style = Ui.small.copy(fontSize = 14.sp, color = Color(0xFFD0D0D0)), modifier = Modifier.weight(1f), maxLines = 1)
+            BarButton(Ic.Close, { ed.removeTrack(layer.id, prop) }, size = 28.dp, iconSize = 16.dp, tint = Ui.Dim, description = "Remove animation")
+        }
+    }
+}
+
+
+// ------------------------------------------------------------------ bottom bar
+
+@Composable
+private fun BottomBar(ed: Editor, compact: Boolean, onAddAudio: () -> Unit) {
+    var addMenu by remember { mutableStateOf(false) }
+    val l = ed.selLayer
+    val b = if (compact) 40.dp else 46.dp
+    Row(
+        Modifier.fillMaxWidth().height(if (compact) 46.dp else 54.dp).background(Ui.Bar).padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            BarButton(Ic.Plus, { addMenu = true }, size = b, description = "Add")
+            ActionMenu(addMenu, { addMenu = false }, buildList {
+                add("Drawing Layer" to { ed.addDrawingLayer() })
+                add("Symbol…" to { ed.panel = Panel.Library })
+                add("Text" to { ed.selectTool(Tool.Text); ed.showHint("Tap the canvas to place text") })
+                if (!ed.inSymbol) add("Camera" to { ed.addCameraLayer() })
+                if (!ed.inSymbol) add("Audio…" to onAddAudio)
+                add("Marker" to { ed.addMarker() })
+            })
+        }
+        if (!compact) Spacer(Modifier.width(150.dp))
+        BarButton(Ic.Path, { ed.motionPaths = !ed.motionPaths }, selected = ed.motionPaths, teal = true, size = b, description = "Motion paths")
+        BarButton(Ic.Key, { ed.autoKey = !ed.autoKey }, selected = ed.autoKey, teal = true, size = b, description = "Auto keyframe")
+        BarButton(Ic.Curve, { ed.panel = if (ed.panel == Panel.Easing) null else Panel.Easing }, selected = ed.panel == Panel.Easing, teal = true, size = b, description = "Easing")
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.End) {
+            when {
+                l == null -> TextAction("Add Layer", { ed.addDrawingLayer() })
+                ed.selProp != null -> {
+                    TextAction("Add Keyframe", { ed.addKeyframe() })
+                    TextAction("Delete Keyframe", { ed.deleteKeyframe() }, enabled = l.track(ed.selProp!!)?.keyAt(ed.frame) != null)
+                }
+                l.type == LayerType.Drawing -> {
+                    TextAction("Add Drawing", { ed.addDrawing() })
+                    TextAction("Duplicate", { ed.addDrawing(copy = true) }, enabled = l.exposureAt(ed.frame) != null)
+                    TextAction("Extend", { ed.extendDrawing() })
+                }
+                l.type == LayerType.Symbol -> {
+                    TextAction("Edit Symbol", { ed.enterSymbol(l.symbolId) })
+                    TextAction("Markers", { ed.panel = Panel.Markers })
+                    TextAction("Add Keyframe", { ed.addKeyframe() })
+                }
+                l.type == LayerType.Audio -> TextAction("Delete Layer", { ed.deleteLayer(l.id) })
+                else -> {
+                    TextAction("Add Keyframe", { ed.addKeyframe() })
+                    TextAction("Delete Keyframe", { ed.deleteKeyframe() })
+                }
             }
         }
-        RowToggle(if (layer.visible) Ic.Eye else Ic.EyeOff, !layer.visible) { state.toggleVisible(layer.id) }
-        RowToggle(if (layer.locked) Ic.Lock else Ic.Unlock, layer.locked) { state.toggleLock(layer.id) }
+    }
+}
+
+// ------------------------------------------------------------------ menus & dialogs
+
+@Composable
+fun ActionSheet(title: String, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF2A2A2A)).padding(vertical = 8.dp)) {
+            Text(title, style = Ui.small.copy(color = Ui.Faint), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            items.forEach { (label, action) ->
+                Text(
+                    label,
+                    style = Ui.body.copy(fontSize = 17.sp, color = if (label.startsWith("Delete")) Ui.Red else Ui.Text),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onDismiss()
+                            action()
+                        }
+                        .padding(horizontal = 20.dp, vertical = 13.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun RowToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, active: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, null, tint = if (active) Ui.Accent else Ui.TextFaint, modifier = Modifier.size(15.dp))
-    }
+private fun LayerMenu(ed: Editor, layer: Layer, onRename: () -> Unit, onDismiss: () -> Unit) {
+    ActionSheet(layer.name, onDismiss, buildList {
+        add("Rename" to onRename)
+        if (layer.type == LayerType.Symbol) add("Edit Symbol" to { ed.enterSymbol(layer.symbolId) })
+        if (layer.type == LayerType.Drawing || layer.type == LayerType.Text) add("Convert to Symbol" to { ed.convertToSymbol(layer.id) })
+        add((if (layer.locked) "Unlock" else "Lock") to { ed.toggleLock(layer.id) })
+        add("Move Up" to { ed.moveLayer(layer.id, up = true) })
+        add("Move Down" to { ed.moveLayer(layer.id, up = false) })
+        if (layer.type != LayerType.Camera) add("Duplicate Layer" to { ed.duplicateLayer(layer.id) })
+        add("Delete Layer" to { ed.deleteLayer(layer.id) })
+    })
 }
 
-/** Edit a timeline marker: comment, colour and the From/To frames it covers. */
+/** Marker comment, colour and From/To frames (ToonSquid's marker editor). */
 @Composable
-private fun MarkerDialog(state: EditorState, m: Marker, onDismiss: () -> Unit) {
+fun MarkerDialog(ed: Editor, m: Marker, onDismiss: () -> Unit) {
     var comment by remember { mutableStateOf(m.comment) }
     var color by remember { mutableIntStateOf(m.color) }
     var from by remember { mutableIntStateOf(m.from) }
     var to by remember { mutableIntStateOf(m.to) }
-    val last = state.project.length - 1
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.width(320.dp).floatingPanel().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Marker", style = Ui.title)
-            BasicTextField(
-                value = comment,
-                onValueChange = { comment = it.take(40) },
-                singleLine = true,
-                textStyle = Ui.body.copy(fontSize = 15.sp),
-                cursorBrush = SolidColor(Ui.Accent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Ui.Bg2)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MarkerColors.forEach { c -> ColorWell(c, { color = c }, size = 32.dp, selected = c == color) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FrameStepper("From", from, Modifier.weight(1f)) { from = it.coerceIn(0, last); if (to < from) to = from }
-                FrameStepper("To", to, Modifier.weight(1f)) { to = it.coerceIn(from, last) }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallAction("Delete", danger = true) {
-                    state.deleteMarker(m.id)
-                    onDismiss()
-                }
-                Spacer(Modifier.weight(1f))
-                DialogButton("Save", primary = true) {
-                    state.updateMarker(m.copy(comment = comment.ifBlank { m.comment }, color = color, from = from, to = to))
-                    onDismiss()
-                }
-            }
+    val last = ed.clip.length - 1
+    AppDialog(
+        "Marker",
+        onDismiss,
+        listOf(
+            "Delete" to { ed.deleteMarker(m.id); onDismiss() },
+            "Done" to { ed.updateMarker(m.copy(comment = comment.ifBlank { m.comment }, color = color, from = from, to = to)); onDismiss() },
+        ),
+    ) {
+        TextInput(comment, { comment = it.take(40) }, Modifier.fillMaxWidth(), placeholder = "Comment")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            MarkerColors.forEach { c -> ColorWell(c, { color = c }, size = 34.dp, selected = c == color) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Stepper("From", from, Modifier.weight(1f)) { from = it.coerceIn(0, last); if (to < from) to = from }
+            Stepper("To", to, Modifier.weight(1f)) { to = it.coerceIn(from, last) }
         }
     }
 }
 
 @Composable
-private fun FrameStepper(label: String, value: Int, modifier: Modifier, onChange: (Int) -> Unit) {
-    Row(
-        modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(12.dp)).background(Ui.Bg2).padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconBtn(Ic.Minus, { onChange(value - 1) }, size = 30.dp, iconSize = 14.dp)
+fun Stepper(label: String, value: Int, modifier: Modifier, onChange: (Int) -> Unit) {
+    Row(modifier.height(44.dp).clip(RoundedCornerShape(10.dp)).background(Ui.Field), verticalAlignment = Alignment.CenterVertically) {
+        BarButton(Ic.Minus, { onChange(value - 1) }, size = 40.dp, iconSize = 16.dp)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = Ui.label.copy(fontSize = 9.sp, color = Ui.TextFaint))
-            Text("${value + 1}", style = Ui.num.copy(fontSize = 13.sp))
+            Text(label, style = Ui.tiny.copy(color = Ui.Faint))
+            Text("${value + 1}", style = Ui.num)
         }
-        IconBtn(Ic.Plus, { onChange(value + 1) }, size = 30.dp, iconSize = 14.dp)
+        BarButton(Ic.Plus, { onChange(value + 1) }, size = 40.dp, iconSize = 16.dp)
     }
 }

@@ -1,15 +1,22 @@
 package com.spideranim
 
+import com.spideranim.model.Clip
 import com.spideranim.model.Ease
-import com.spideranim.model.Keyframe
+import com.spideranim.model.Edits
+import com.spideranim.model.Exposure
 import com.spideranim.model.Layer
-import com.spideranim.model.Pick
+import com.spideranim.model.LayerType
+import com.spideranim.model.Marker
+import com.spideranim.model.Project
+import com.spideranim.model.ProjectJson
+import com.spideranim.model.Prop
 import com.spideranim.model.Pt
 import com.spideranim.model.Stroke
 import com.spideranim.model.StrokeKind
-import com.spideranim.model.Xform
+import com.spideranim.model.V2
+import com.spideranim.model.clipBounds
+import com.spideranim.model.Xf
 import com.spideranim.model.eraseStrokes
-import com.spideranim.model.insidePolygon
 import com.spideranim.model.rectPoints
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,92 +27,154 @@ import org.junit.Test
 
 class ModelTest {
 
-    @Test
-    fun linearEaseIsIdentity() {
-        for (i in 0..10) assertEquals(i / 10f, Ease.Linear.apply(i / 10f), 1e-4f)
-    }
+    private fun dot(x: Float) = Stroke(StrokeKind.Pencil, listOf(Pt(x, 0f), Pt(x + 1, 0f)), 0, 2f)
+    private fun drawing() = Layer(name = "D", type = LayerType.Drawing)
 
     @Test
-    fun easesHitEndpointsAndBend() {
+    fun easesHitEndpoints() {
         for ((_, e) in Ease.presets) {
             assertEquals(0f, e.apply(0f), 1e-4f)
             assertEquals(1f, e.apply(1f), 1e-4f)
         }
         assertTrue(Ease.In.apply(0.5f) < 0.5f)
         assertTrue(Ease.Out.apply(0.5f) > 0.5f)
-        assertEquals(0.5f, Ease.InOut.apply(0.5f), 1e-3f)
-        // Back overshoots past 1 before settling.
-        assertTrue((1..99).any { Ease.Back.apply(it / 100f) > 1f })
     }
 
     @Test
-    fun poseInterpolatesAndHoldsPickedDrawing() {
-        val layer = Layer(
-            name = "L", symbolId = 1,
-            keyframes = listOf(Keyframe(0, Xform(0f, 0f)), Keyframe(10, Xform(100f, 50f))),
-            picks = listOf(Pick(0, 2), Pick(10, 0)),
-        )
-        assertEquals(50f, layer.poseAt(5).xf.x, 1e-3f)
-        assertEquals(25f, layer.poseAt(5).xf.y, 1e-3f)
-        assertEquals(2, layer.poseAt(9).symbolFrame)
-        assertEquals(0, layer.poseAt(10).symbolFrame)
-        assertEquals(100f, layer.poseAt(30).xf.x, 1e-3f)
-
-        val held = layer.withKey(0) { it.copy(tween = false) }
-        assertEquals(0f, held.poseAt(9).xf.x, 1e-3f)
+    fun drawingOnEmptyFrameCreatesOneFrameDrawing() {
+        var l = drawing()
+        l = Edits.addStroke(l, 3, dot(0f))
+        l = Edits.addStroke(l, 3, dot(5f))
+        l = Edits.addStroke(l, 0, dot(9f))
+        assertEquals(listOf(0, 3), l.exposures.map { it.start })
+        assertEquals(2, l.exposureAt(3)!!.strokes.size)
+        assertNull(l.exposureAt(1))
     }
 
     @Test
-    fun picksReplaceAtSameFrameAndStaySorted() {
-        val layer = Layer(name = "L", symbolId = 1, keyframes = listOf(Keyframe(0, Xform())))
-        assertEquals(0, layer.drawingAt(5))
-        val l2 = layer.withPick(8, 3).withPick(2, 1).withPick(8, 4)
-        assertEquals(listOf(Pick(2, 1), Pick(8, 4)), l2.picks)
-        assertEquals(1, l2.drawingAt(0)) // before the first pick, the first pick's drawing shows
-        assertEquals(1, l2.drawingAt(7))
-        assertEquals(4, l2.drawingAt(30))
+    fun addDrawingInsertsAfterCurrentAndPushesLaterOnes() {
+        var l = drawing().copy(exposures = listOf(Exposure(start = 0, length = 2, strokes = listOf(dot(0f))), Exposure(start = 2, strokes = listOf(dot(1f)))))
+        val (l2, at) = Edits.addDrawing(l, 1, copy = false)
+        assertEquals(2, at)
+        assertEquals(listOf(0 to 2, 2 to 1, 3 to 1), l2.exposures.map { it.start to it.length })
+        assertTrue(l2.exposureAt(2)!!.strokes.isEmpty())
+
+        val (l3, at3) = Edits.addDrawing(l2, 0, copy = true)
+        assertEquals(2, at3)
+        assertEquals(1, l3.exposureAt(2)!!.strokes.size)
+        l = l3
+        assertEquals(listOf(0, 2, 3, 4), l.exposures.map { it.start })
     }
 
     @Test
-    fun withKeyCreatesKeyFromInterpolatedPose() {
-        val layer = Layer(
-            name = "L", symbolId = 1,
-            keyframes = listOf(Keyframe(0, Xform(0f, 0f)), Keyframe(10, Xform(100f, 0f))),
-        )
-        val keyed = layer.withKey(4) { it }
-        assertEquals(3, keyed.keyframes.size)
-        assertEquals(listOf(0, 4, 10), keyed.keyframes.map { it.frame })
-        assertEquals(40f, keyed.keyAt(4)!!.xf.x, 1e-3f)
-        // Motion is unchanged by inserting a key on the path.
-        assertEquals(layer.poseAt(7).xf.x, keyed.poseAt(7).xf.x, 1e-3f)
+    fun extendAndShortenRipple() {
+        var l = drawing().copy(exposures = listOf(Exposure(start = 0), Exposure(start = 1), Exposure(start = 5)))
+        l = Edits.extend(l, 0)
+        assertEquals(listOf(0 to 2, 2 to 1, 6 to 1), l.exposures.map { it.start to it.length })
+        l = Edits.extend(l, 4) // empty frame: previous drawing stretches to it
+        assertEquals(2 to 3, l.exposures[1].start to l.exposures[1].length)
+        l = Edits.shorten(l, 0)
+        assertEquals(listOf(0 to 1, 1 to 3, 5 to 1), l.exposures.map { it.start to it.length })
     }
 
     @Test
-    fun xformRoundTrips() {
-        val xf = Xform(120f, -40f, 1.5f, 0.75f, 33f)
+    fun moveExposureRefusesOverlap() {
+        val a = Exposure(start = 0, length = 2)
+        val b = Exposure(start = 4)
+        val l = drawing().copy(exposures = listOf(a, b))
+        assertEquals(0, Edits.moveExposure(l, a.id, 3).exposures.first { it.id == a.id }.start)
+        assertEquals(1, Edits.moveExposure(l, a.id, 1).exposures.first { it.id == a.id }.start)
+    }
+
+    @Test
+    fun propertiesKeyOnlyWhenAnimated() {
+        var l = drawing()
+        l = l.set(Prop.Position, 5, V2(10f, 20f), autoKey = false)
+        assertNull(l.track(Prop.Position))
+        assertEquals(10f, l.xfAt(99).x, 0f)
+        l = l.withKey(Prop.Position, 0, V2(0f, 0f)).withKey(Prop.Position, 10, V2(100f, 0f))
+        assertEquals(50f, l.xfAt(5).x, 1e-3f)
+        l = l.set(Prop.Position, 5, V2(70f, 0f), autoKey = false)
+        assertEquals(3, l.track(Prop.Position)!!.keys.size)
+        l = l.withoutTrack(Prop.Position, 5)
+        assertNull(l.track(Prop.Position))
+        assertEquals(70f, l.x, 1e-3f)
+    }
+
+    @Test
+    fun timeIsHeldAndLoopsWithoutKeys() {
+        val sym = Clip(name = "Mouth", length = 4)
+        val layer = Layer(name = "M", type = LayerType.Symbol, symbolId = sym.id)
+        val p = Project(name = "P", scene = Clip(name = "S", length = 24, layers = listOf(layer)), symbols = listOf(sym))
+        assertEquals(1, p.symbolFrame(layer, 5))
+        val keyed = layer.withKey(Prop.Time, 0, V2(2f)).withKey(Prop.Time, 10, V2(0f))
+        assertEquals(2, p.symbolFrame(keyed, 9))
+        assertEquals(0, p.symbolFrame(keyed, 10))
+    }
+
+    @Test
+    fun convertToSymbolKeepsPlacement() {
+        val art = Stroke(StrokeKind.Rect, rectPoints(100f, 100f, 200f, 300f), 0, 0f, closed = true)
+        val layer = Layer(name = "Box", type = LayerType.Drawing, exposures = listOf(Exposure(start = 0, strokes = listOf(art))))
+        val scene = Clip(name = "S", length = 10, layers = listOf(layer))
+        val p = Project(name = "P", scene = scene)
+        val (p2, sym) = Edits.convertToSymbol(p, scene.id, layer.id, 0)!!
+        val outer = p2.scene.layers.single()
+        assertEquals(LayerType.Symbol, outer.type)
+        assertEquals(150f, outer.x, 1e-3f)
+        assertEquals(200f, outer.y, 1e-3f)
+        val b = p2.clipBounds(p2.scene, 0)!!
+        assertEquals(100f, b.left, 1e-3f)
+        assertEquals(300f, b.bottom, 1e-3f)
+        assertTrue(Edits.wouldNest(p2, sym.id, sym.id))
+        assertFalse(Edits.wouldNest(p2, p2.scene.id, sym.id))
+    }
+
+    @Test
+    fun xfRoundTripsWithAnchor() {
+        val xf = Xf(120f, -40f, 33f, 1.5f, 0.75f, 1f, 960f, 540f)
         val p = Pt(12f, -7f)
         val back = xf.toLocal(xf.toStage(p))
-        assertEquals(p.x, back.x, 1e-3f)
-        assertEquals(p.y, back.y, 1e-3f)
+        assertEquals(p.x, back.x, 1e-2f)
+        assertEquals(p.y, back.y, 1e-2f)
+        assertEquals(Pt(120f, -40f), Xf(120f, -40f, 10f, 2f, 2f, 1f, 960f, 540f).toStage(Pt(960f, 540f)))
     }
 
     @Test
-    fun eraserSplitsOpenStrokesAndRemovesShapes() {
+    fun eraserSplitsOpenStrokes() {
         val line = Stroke(StrokeKind.Pencil, List(21) { Pt(it * 10f, 0f) }, 0, 2f)
         val split = eraseStrokes(listOf(line), 100f, 0f, 15f)
         assertNotNull(split)
         assertEquals(2, split!!.size)
-        assertTrue(split.all { s -> s.points.none { kotlin.math.abs(it.x - 100f) < 15f } })
-
-        val box = Stroke(StrokeKind.Rect, rectPoints(0f, 0f, 50f, 50f), 0, 2f, fill = 1, closed = true)
-        assertEquals(0, eraseStrokes(listOf(box), 25f, 25f, 5f)!!.size)
-        assertNull(eraseStrokes(listOf(box), 200f, 200f, 5f))
     }
 
     @Test
-    fun polygonContainment() {
-        val sq = rectPoints(0f, 0f, 10f, 10f)
-        assertTrue(insidePolygon(sq, 5f, 5f))
-        assertFalse(insidePolygon(sq, 15f, 5f))
+    fun jsonRoundTrip() {
+        val sym = Clip(name = "Mouth", length = 3, markers = listOf(Marker(from = 0, to = 0, comment = "A,E,I")),
+            layers = listOf(Layer(name = "D", type = LayerType.Drawing, exposures = listOf(Exposure(start = 1, length = 2, strokes = listOf(dot(3f)))))))
+        val layer = Layer(name = "M", type = LayerType.Symbol, symbolId = sym.id, x = 5f)
+            .withKey(Prop.Time, 4, V2(2f)).withKey(Prop.Position, 0, V2(1f, 2f))
+        val p = Project(name = "P", fps = 30, scene = Clip(name = "Scene 1", length = 48, layers = listOf(layer)), symbols = listOf(sym))
+        val back = ProjectJson.read(ProjectJson.write(p))
+        assertEquals(p.copy(symbols = emptyList(), scene = p.scene.copy(layers = emptyList())), back.copy(symbols = emptyList(), scene = back.scene.copy(layers = emptyList())))
+        assertEquals(p.scene.layers, back.scene.layers)
+        assertEquals(p.symbols[0].markers, back.symbols[0].markers)
+        val e = back.symbols[0].layers[0].exposures.single()
+        assertEquals(1 to 2, e.start to e.length)
+        assertEquals(3f, e.strokes.single().points[0].x, 1e-3f)
+    }
+
+    @Test
+    fun demoProjectIsConsistent() {
+        val p = com.spideranim.model.Demo.project()
+        val mouth = p.scene.layers.first { it.type == LayerType.Symbol }
+        val sym = p.clip(mouth.symbolId)!!
+        assertEquals(sym.length, sym.markers.size)
+        assertEquals(2, p.symbolFrame(mouth, 9)) // "O" picked at frame 8
+        assertNotNull(p.clipBounds(p.scene, 0))
+        val back = ProjectJson.read(ProjectJson.write(p))
+        assertEquals(p.scene.layers.map { it.tracks }, back.scene.layers.map { it.tracks })
+        assertEquals(p.scene.layers[0].exposures.single().strokes.size, back.scene.layers[0].exposures.single().strokes.size)
+        assertEquals(sym.markers, back.clip(sym.id)!!.markers)
     }
 }

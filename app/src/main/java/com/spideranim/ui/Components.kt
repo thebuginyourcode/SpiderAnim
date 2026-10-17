@@ -51,76 +51,6 @@ import com.spideranim.ui.theme.Ui
 import androidx.compose.ui.graphics.drawscope.Stroke as LineStyle
 
 @Composable
-fun IconBtn(
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false,
-    enabled: Boolean = true,
-    size: Dp = 40.dp,
-    iconSize: Dp = 20.dp,
-    description: String? = null,
-) {
-    val bg by animateColorAsState(if (selected) Ui.AccentSoft else Color.Transparent, label = "btnBg")
-    val fg by animateColorAsState(
-        when {
-            !enabled -> Ui.TextFaint.copy(alpha = 0.5f)
-            selected -> Ui.Accent
-            else -> Ui.TextDim
-        },
-        label = "btnFg",
-    )
-    Box(
-        modifier
-            .size(size)
-            .clip(RoundedCornerShape(size * 0.3f))
-            .background(bg)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, description, tint = fg, modifier = Modifier.size(iconSize))
-    }
-}
-
-@Composable
-fun Hairline(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(1.dp).background(Ui.Line))
-}
-
-@Composable
-fun VHairline(modifier: Modifier = Modifier, height: Dp = 20.dp) {
-    Box(modifier.width(1.dp).height(height).background(Ui.Line))
-}
-
-@Composable
-fun SectionLabel(text: String, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(text.uppercase(), style = Ui.caps, modifier = Modifier.weight(1f))
-        trailing()
-    }
-}
-
-@Composable
-fun Section(title: String, trailing: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionLabel(title, trailing = trailing)
-        content()
-    }
-}
-
-@Composable
-fun EmptyNote(title: String, body: String, modifier: Modifier = Modifier) {
-    Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = Ui.title.copy(fontSize = 14.sp))
-        Text(body, style = Ui.label.copy(fontSize = 12.sp, color = Ui.TextFaint, lineHeight = 17.sp))
-    }
-}
-
-/**
- * Animate-style "hot text": drag sideways to scrub the value. Accumulates from the value at drag
- * start so fast drags don't drift against recomposition.
- */
-@Composable
 fun ScrubField(
     label: String,
     value: Float,
@@ -135,12 +65,12 @@ fun ScrubField(
     val change by rememberUpdatedState(onChange)
     val start by rememberUpdatedState(onStart)
     var active by remember { mutableStateOf(false) }
-    val border by animateColorAsState(if (active) Ui.Accent else Color.Transparent, label = "scrubBorder")
+    val border by animateColorAsState(if (active) Ui.Teal else Color.Transparent, label = "scrubBorder")
     Row(
         modifier
             .height(36.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(Ui.Bg2)
+            .background(Ui.Field)
             .border(1.dp, border, RoundedCornerShape(10.dp))
             .pointerInput(Unit) {
                 awaitEachGesture {
@@ -164,11 +94,11 @@ fun ScrubField(
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = Ui.label.copy(color = Ui.TextFaint))
+        Text(label, style = Ui.small.copy(color = Ui.Faint))
         Spacer(Modifier.weight(1f))
         Text(
             "%.${decimals}f".format(value) + suffix,
-            style = Ui.num.copy(fontSize = 12.sp, color = if (active) Ui.Accent else Ui.Text),
+            style = Ui.num.copy(fontSize = 12.sp, color = if (active) Ui.Teal else Ui.Text),
         )
     }
 }
@@ -208,39 +138,22 @@ fun MiniSlider(
         val pad = 8.dp.toPx()
         val y = size.height / 2
         val x = pad + t * (size.width - pad * 2)
-        drawLine(Ui.Bg3, Offset(pad, y), Offset(size.width - pad, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(Ui.Accent, Offset(pad, y), Offset(x, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(Ui.Pressed, Offset(pad, y), Offset(size.width - pad, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(Ui.Teal, Offset(pad, y), Offset(x, y), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
         drawCircle(Color.Black.copy(alpha = 0.3f), radius = 8.dp.toPx(), center = Offset(x, y + 1.dp.toPx()))
         drawCircle(Color.White, radius = 7.dp.toPx(), center = Offset(x, y))
     }
 }
 
 @Composable
-fun ToggleChip(text: String, checked: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val bg by animateColorAsState(if (checked) Ui.AccentSoft else Ui.Bg2, label = "chipBg")
-    val fg by animateColorAsState(if (checked) Ui.Accent else Ui.TextDim, label = "chipFg")
-    Box(
-        modifier
-            .height(30.dp)
-            .clip(RoundedCornerShape(15.dp))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text, style = Ui.label.copy(color = fg, fontSize = 12.sp))
-    }
-}
-
-@Composable
 fun <T> Segmented(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier.height(30.dp).clip(RoundedCornerShape(10.dp)).background(Ui.Bg2).padding(2.dp),
+        modifier.height(30.dp).clip(RoundedCornerShape(10.dp)).background(Ui.Field).padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         options.forEach { (label, v) ->
             val on = v == selected
-            val bg by animateColorAsState(if (on) Ui.Bg3 else Color.Transparent, label = "segBg")
+            val bg by animateColorAsState(if (on) Ui.Pressed else Color.Transparent, label = "segBg")
             Box(
                 Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -250,7 +163,7 @@ fun <T> Segmented(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> 
                     .height(26.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, style = Ui.label.copy(color = if (on) Ui.Text else Ui.TextDim, fontSize = 12.sp))
+                Text(label, style = Ui.small.copy(color = if (on) Ui.Text else Ui.Dim, fontSize = 12.sp))
             }
         }
     }
@@ -258,39 +171,8 @@ fun <T> Segmented(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> 
 
 /** A text chip that opens a small menu. */
 @Composable
-fun MenuChip(text: String, options: List<Pair<String, () -> Unit>>, modifier: Modifier = Modifier, current: String? = null) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier) {
-        Box(
-            Modifier
-                .height(30.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Ui.Bg2)
-                .clickable { open = true }
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text, style = Ui.num.copy(fontSize = 12.sp, color = Ui.TextDim), maxLines = 1)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            options.forEach { (label, action) ->
-                DropdownMenuItem(
-                    text = {
-                        Text(label, style = Ui.body.copy(color = if (label == current) Ui.Accent else Ui.Text))
-                    },
-                    onClick = {
-                        open = false
-                        action()
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun ColorWell(color: Int?, onClick: () -> Unit, modifier: Modifier = Modifier, size: Dp = 28.dp, selected: Boolean = false) {
-    val ring by animateColorAsState(if (selected) Ui.Accent else Ui.Line, label = "wellRing")
+    val ring by animateColorAsState(if (selected) Ui.Teal else Ui.Line, label = "wellRing")
     Box(
         modifier
             .size(size)
@@ -298,7 +180,7 @@ fun ColorWell(color: Int?, onClick: () -> Unit, modifier: Modifier = Modifier, s
             .border(if (selected) 2.dp else 1.dp, ring, CircleShape)
             .padding(3.dp)
             .clip(CircleShape)
-            .background(if (color != null) Color(color) else Ui.Bg2)
+            .background(if (color != null) Color(color) else Ui.Field)
             .clickable(onClick = onClick),
     ) {
         if (color == null) {
@@ -394,7 +276,7 @@ fun ColorPicker(color: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifi
         }
         Text(
             "#%06X".format(color and 0xFFFFFF),
-            style = Ui.num.copy(fontSize = 12.sp, color = Ui.TextDim),
+            style = Ui.num.copy(fontSize = 12.sp, color = Ui.Dim),
             maxLines = 1,
             overflow = TextOverflow.Clip,
         )
@@ -402,16 +284,143 @@ fun ColorPicker(color: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifi
 }
 
 /** Accent play button used in the transport bar. */
+
+/** Toolbar button: a glyph that gets a dark (or teal) square behind it when selected. */
 @Composable
-fun PlayButton(playing: Boolean, onClick: () -> Unit, size: Dp = 38.dp) {
+fun BarButton(
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    teal: Boolean = false,
+    enabled: Boolean = true,
+    size: Dp = 44.dp,
+    iconSize: Dp = 24.dp,
+    tint: Color = Color.White,
+    description: String? = null,
+) {
+    val bg = when {
+        selected && teal -> Ui.TealButton
+        selected -> Ui.Pressed
+        else -> Color.Transparent
+    }
     Box(
-        Modifier
+        modifier
             .size(size)
-            .clip(CircleShape)
-            .background(Ui.Accent)
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(if (playing) com.spideranim.ui.icons.Ic.Pause else com.spideranim.ui.icons.Ic.Play, if (playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(18.dp))
+        androidx.compose.material3.Icon(icon, description, tint = if (enabled) tint else Ui.Faint, modifier = Modifier.size(iconSize))
+    }
+}
+
+/** Plain text button, as in the timeline's bottom bar ("Add Keyframe"). */
+@Composable
+fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = Ui.body.copy(fontSize = 16.sp, color = if (enabled) Color(0xFFD8D8D8) else Ui.Faint), maxLines = 1)
+    }
+}
+
+/** The top bar's slider: thin track, white fill, big white knob. */
+@Composable
+fun KnobSlider(value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit, modifier: Modifier = Modifier) {
+    val change by rememberUpdatedState(onChange)
+    val t = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+    Canvas(
+        modifier
+            .height(40.dp)
+            .pointerInput(range) {
+                val pad = 16.dp.toPx()
+                fun set(x: Float) {
+                    val k = ((x - pad) / (size.width - pad * 2)).coerceIn(0f, 1f)
+                    change(range.start + k * (range.endInclusive - range.start))
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    set(down.position.x)
+                    down.consume()
+                    drag(down.id) {
+                        set(it.position.x)
+                        it.consume()
+                    }
+                }
+            },
+    ) {
+        val pad = 16.dp.toPx()
+        val y = size.height / 2
+        val x = pad + t * (size.width - pad * 2)
+        drawLine(Color(0xFF4A4A4A), Offset(pad, y), Offset(size.width - pad, y), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(Color(0xFFE8E8E8), Offset(pad, y), Offset(x, y), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+        drawCircle(Color.Black.copy(alpha = 0.35f), radius = 15.dp.toPx(), center = Offset(x, y + 1.dp.toPx()))
+        drawCircle(Color.White, radius = 14.dp.toPx(), center = Offset(x, y))
+    }
+}
+
+@Composable
+fun TextInput(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "", singleLine: Boolean = true) {
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = singleLine,
+        textStyle = Ui.body.copy(fontSize = 16.sp),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Ui.Teal),
+        decorationBox = { inner ->
+            Box {
+                if (value.isEmpty()) Text(placeholder, style = Ui.body.copy(fontSize = 16.sp, color = Ui.Faint))
+                inner()
+            }
+        },
+        modifier = modifier.clip(RoundedCornerShape(10.dp)).background(Ui.Field).padding(horizontal = 14.dp, vertical = 11.dp),
+    )
+}
+
+/** A dialog card in the app's style, with right-aligned text buttons. */
+@Composable
+fun AppDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    actions: List<Pair<String, () -> Unit>>,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .width(340.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF2A2A2A))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(title, style = Ui.body.copy(fontSize = 19.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = Color.White))
+            content()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                actions.forEach { (label, action) -> TextAction(label, action) }
+            }
+        }
+    }
+}
+
+/** A dropdown of text actions anchored to [anchor]. */
+@Composable
+fun ActionMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
+        items.forEach { (label, action) ->
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(label, style = Ui.body) },
+                onClick = {
+                    onDismiss()
+                    action()
+                },
+            )
+        }
     }
 }

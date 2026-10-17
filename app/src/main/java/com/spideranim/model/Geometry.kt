@@ -8,6 +8,9 @@ import kotlin.math.min
 import kotlin.math.sin
 
 data class Bounds(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    fun union(o: Bounds?) = if (o == null) this else Bounds(min(left, o.left), min(top, o.top), max(right, o.right), max(bottom, o.bottom))
+    val corners: List<Pt> get() = listOf(Pt(left, top), Pt(right, top), Pt(right, bottom), Pt(left, bottom))
+
     val w: Float get() = right - left
     val h: Float get() = bottom - top
     val cx: Float get() = (left + right) / 2f
@@ -17,7 +20,7 @@ data class Bounds(val left: Float, val top: Float, val right: Float, val bottom:
         x >= left - pad && x <= right + pad && y >= top - pad && y <= bottom + pad
 }
 
-fun Drawing.bounds(): Bounds? {
+fun strokeBounds(strokes: List<Stroke>): Bounds? {
     var l = Float.MAX_VALUE
     var t = Float.MAX_VALUE
     var r = -Float.MAX_VALUE
@@ -131,7 +134,7 @@ fun eraseStrokes(strokes: List<Stroke>, x: Float, y: Float, radius: Float): List
             continue
         }
         changed = true
-        val whole = s.closed || s.fill != null || s.kind == StrokeKind.Line || s.kind == StrokeKind.Pen
+        val whole = s.closed || s.fill != null || s.kind == StrokeKind.Line || s.kind == StrokeKind.Path
         if (whole) continue
         val dense = densify(s.points, (hitR * 0.5f).coerceAtLeast(0.5f))
         var piece = ArrayList<Pt>()
@@ -147,3 +150,12 @@ fun eraseStrokes(strokes: List<Stroke>, x: Float, y: Float, radius: Float): List
     }
     return if (changed) out else null
 }
+
+/** Axis-aligned bounds of [b] after placing it with [xf]. */
+fun Xf.mapBounds(b: Bounds): Bounds {
+    val pts = b.corners.map { toStage(it) }
+    return Bounds(pts.minOf { it.x }, pts.minOf { it.y }, pts.maxOf { it.x }, pts.maxOf { it.y })
+}
+
+fun boundsOf(pts: List<Pt>): Bounds? =
+    if (pts.isEmpty()) null else Bounds(pts.minOf { it.x }, pts.minOf { it.y }, pts.maxOf { it.x }, pts.maxOf { it.y })

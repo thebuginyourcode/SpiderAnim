@@ -8,14 +8,18 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
-import com.spideranim.model.Drawing
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import com.spideranim.model.Bounds
+import com.spideranim.model.Clip
 import com.spideranim.model.Layer
+import com.spideranim.model.LayerType
 import com.spideranim.model.Project
+import com.spideranim.model.Xf
 import com.spideranim.model.Pt
 import com.spideranim.model.Stroke
-import com.spideranim.model.Xform
-import com.spideranim.model.bounds
 import java.util.WeakHashMap
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -147,65 +151,117 @@ fun DrawScope.drawMark(s: Stroke, tint: Color? = null, alpha: Float = 1f, cached
     }
 }
 
-fun DrawScope.drawInstance(
-    d: Drawing,
-    xf: Xform,
-    tint: Color? = null,
-    alpha: Float = 1f,
-    cached: Boolean = true,
-    extra: (DrawScope.() -> Unit)? = null,
-) {
-    withTransform({
-        translate(xf.x, xf.y)
-        rotate(xf.rot, Offset.Zero)
-        scale(xf.sx, xf.sy, Offset.Zero)
-    }) {
-        val a = alpha * xf.alpha
-        if (a < 0.999f && d.strokes.size > 1) {
-            // Fade the instance as one image so overlapping strokes don't darken.
-            val canvas = drawContext.canvas
-            canvas.saveLayer(Rect(-1e5f, -1e5f, 1e5f, 1e5f), Paint().apply { this.alpha = a })
-            d.strokes.forEach { drawMark(it, tint, 1f, cached) }
-            extra?.invoke(this)
-            canvas.restore()
-        } else {
-            d.strokes.forEach { drawMark(it, tint, a, cached) }
-            extra?.invoke(this)
+
+private val textPaint = ThreadLocal.withInitial {
+    android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+}
+
+/** Text centred on the layer origin, one line per '\n'. */
+fun DrawScope.drawTextLayer(layer: Layer, tint: Color? = null) {
+    val paint = textPaint.get()!!
+    paint.textSize = layer.textSize
+    paint.color = (tint ?: Color(layer.textColor)).toArgb()
+    val lines = layer.text.ifEmpty { " " }.split('\n')
+    val lh = layer.textSize * 1.2f
+    val top = -lines.size * lh / 2f
+    drawIntoCanvas { c ->
+        lines.forEachIndexed { i, line ->
+            c.nativeCanvas.drawText(line, 0f, top + i * lh + layer.textSize * 0.95f, paint)
         }
     }
 }
 
-fun DrawScope.drawScene(
-    project: Project,
-    frame: Int,
-    cached: Boolean = true,
-    only: Long? = null,
-    tint: Color? = null,
-    alpha: Float = 1f,
-    inLayer: (DrawScope.(Layer) -> Unit)? = null,
-) {
-    for (layer in project.layers) {
+fun DrawScope.withXf(xf: Xf, block: DrawScope.() -> Unit) {
+    withTransform({
+        translate(xf.x, xf.y)
+        rotate(xf.rot, Offset.Zero)
+        scale(xf.sx, xf.sy, Offset.Zero)
+        translate(-xf.ax, -xf.ay)
+    }, block)
+}
+
+/** Faded layers are drawn into their own buffer so overlapping strokes don't darken. */
+private inline fun DrawScope.faded(alpha: Float, block: () -> Unit) {
+    if (alpha >= 0.999f) {
+        block()
+        return
+    }
+    val canvas = drawContext.canvas
+    canvas.saveLayer(Rect(-1e5f, -1e5f, 1e5f, 1e5f), Paint().apply { this.alpha = alpha })
+    block()
+    canvas.restore()
+}
+
+class RenderOptions(
+    val cached: Boolean = true,
+    /** Overrides every colour (onion skin). */
+    val tint: Color? = null,
+    val alpha: Float = 1f,
+    /** Only this layer of the top clip. */
+    val only: Long? = null,
+    /** Called inside a top-level layer's transform after its content (live strokes, previews). */
+    val inLayer: (DrawScope.(Layer) -> Unit)? = null,
+)
+
+/** Draws [clip] at [frame] in clip space, symbols included recursively. */
+fun DrawScope.drawClip(project: Project, clip: Clip, frame: Int, opt: RenderOptions = RenderOptions(), depth: Int = 0) {
+    if (depth > 8) return
+    for (layer in clip.layers) {
         if (!layer.visible) continue
-        if (only != null && layer.id != only) continue
-        val sym = project.symbol(layer.symbolId) ?: continue
-        val pose = layer.poseAt(frame)
-        val extra: (DrawScope.() -> Unit)? = inLayer?.let { f -> fun DrawScope.() { f(this, layer) } }
-        drawInstance(sym.frameAt(pose.symbolFrame), pose.xf, tint, alpha, cached, extra)
+        if (depth == 0 && opt.only != null && layer.id != opt.only) continue
+        if (layer.type == LayerType.Camera || layer.type == LayerType.Audio) continue
+        val xf = layer.xfAt(frame)
+        val a = xf.alpha * if (depth == 0) opt.alpha else 1f
+        if (a <= 0.001f) continue
+        withXf(xf) {
+            faded(if (opt.tint != null) 1f else a) {
+                val strokeAlpha = if (opt.tint != null) a else 1f
+                when (layer.type) {
+                    LayerType.Drawing -> layer.exposureAt(frame)?.strokes?.forEach { drawMark(it, opt.tint, strokeAlpha, opt.cached) }
+                    LayerType.Symbol -> project.clip(layer.symbolId)?.let { sym ->
+                        drawClip(project, sym, project.symbolFrame(layer, frame), RenderOptions(opt.cached, opt.tint, strokeAlpha), depth + 1)
+                    }
+                    LayerType.Text -> drawTextLayer(layer, opt.tint)
+                    else -> Unit
+                }
+                if (depth == 0) opt.inLayer?.invoke(this, layer)
+            }
+        }
     }
 }
 
-/** Draws [d] scaled to fit the current draw area, centred. Used for symbol thumbnails. */
-fun DrawScope.drawFitted(d: Drawing, pad: Float) {
-    val b = d.bounds() ?: return
-    val s = min(
-        (size.width - pad * 2f) / b.w.coerceAtLeast(1f),
-        (size.height - pad * 2f) / b.h.coerceAtLeast(1f),
-    )
+/** Maps the scene into the camera's view (identity when there is no camera layer). */
+fun DrawScope.withCamera(clip: Clip, frame: Int, block: DrawScope.() -> Unit) {
+    val cam = clip.camera
+    if (cam == null) {
+        block()
+        return
+    }
+    val c = cam.xfAt(frame)
+    withTransform({
+        translate(c.ax, c.ay)
+        scale(1f / c.sx.coerceAtLeast(0.01f), 1f / c.sy.coerceAtLeast(0.01f), Offset.Zero)
+        rotate(-c.rot, Offset.Zero)
+        translate(-c.x, -c.y)
+    }, block)
+}
+
+/** A whole frame of the scene as the camera sees it, on the stage background. */
+fun DrawScope.drawSceneFrame(project: Project, frame: Int, cached: Boolean = true) {
+    drawRect(Color(project.background), size = androidx.compose.ui.geometry.Size(project.width.toFloat(), project.height.toFloat()))
+    withCamera(project.scene, frame) { drawClip(project, project.scene, frame, RenderOptions(cached = cached)) }
+}
+
+/** Draws strokes or a clip frame scaled to fit the draw area (thumbnails). */
+fun DrawScope.drawFitted(bounds: Bounds?, pad: Float, block: DrawScope.() -> Unit) {
+    val b = bounds ?: return
+    val s = min((size.width - pad * 2f) / b.w.coerceAtLeast(1f), (size.height - pad * 2f) / b.h.coerceAtLeast(1f))
     withTransform({
         translate(size.width / 2f, size.height / 2f)
         scale(s, s, Offset.Zero)
         translate(-b.cx, -b.cy)
-    }) {
-        d.strokes.forEach { drawMark(it) }
-    }
+    }, block)
 }

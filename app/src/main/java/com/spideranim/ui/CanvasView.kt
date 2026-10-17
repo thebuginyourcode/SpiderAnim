@@ -66,7 +66,7 @@ fun CanvasView(ed: Editor, modifier: Modifier = Modifier) {
     // just keep the stage centred where it was instead of re-zooming.
     LaunchedEffect(size, ed.fitRequest) {
         if (size.width > 0 && size.height > 0 && fitted != ed.fitRequest) {
-            ed.fitView(size.width.toFloat(), size.height.toFloat(), 0f)
+            ed.fitView(size.width.toFloat(), size.height.toFloat(), 24f * dp)
             fitted = ed.fitRequest
         }
     }
@@ -98,8 +98,13 @@ fun CanvasView(ed: Editor, modifier: Modifier = Modifier) {
             translate(off.x, off.y)
             scale(vs, vs, Offset.Zero)
         }) {
-            drawRect(Color(p.background), size = Size(w, h))
-            clipRect(0f, 0f, w, h) {
+            // Everything the view shows, in view space: art may sit outside the camera frame.
+            val vl = -off.x / vs
+            val vt = -off.y / vs
+            val vr = (size.width - off.x) / vs
+            val vb = (size.height - off.y) / vs
+            drawRect(Color(p.background), topLeft = Offset(vl, vt), size = Size(vr - vl, vb - vt))
+            run {
                 clipSpace(ed) {
                     if (ed.onion && !ed.playing && sel != null && sel.type == LayerType.Drawing) drawOnion(p, sel, frame)
                     drawClip(p, clip, frame, RenderOptions(inLayer = { layer ->
@@ -114,6 +119,13 @@ fun CanvasView(ed: Editor, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            // Dim what lies outside the camera frame, and outline the frame.
+            val shade = Ui.Workspace.copy(alpha = 0.62f)
+            drawRect(shade, Offset(vl, vt), Size(vr - vl, (0f - vt).coerceAtLeast(0f)))
+            drawRect(shade, Offset(vl, h), Size(vr - vl, (vb - h).coerceAtLeast(0f)))
+            drawRect(shade, Offset(vl, 0f), Size((0f - vl).coerceAtLeast(0f), h))
+            drawRect(shade, Offset(w, 0f), Size((vr - w).coerceAtLeast(0f), h))
+            drawRect(Color(0xFF555555), Offset.Zero, Size(w, h), style = LineStyle(width = 1f / vs))
         }
         if (!ed.playing && !ed.preview) {
             if (sel != null && ed.motionPaths) drawMotionPath(ed, ctrl, sel, dp)

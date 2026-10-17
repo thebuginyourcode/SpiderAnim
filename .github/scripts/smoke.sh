@@ -45,6 +45,13 @@ adb shell input swipe 1000 380 1400 520 400
 tap_by text "Add Drawing"
 adb shell input swipe 1000 520 1400 380 400
 shot tablet-1-frames
+# Draw past the camera frame, then drag the playback bar up to grow the timeline.
+adb shell input swipe 700 300 230 640 400
+ui
+P=$(python3 .github/scripts/find.py /tmp/ui.xml content-desc "Previous frame" 0)
+if [ -n "$P" ]; then set -- $P; adb shell input swipe $(( $1 + 320 )) $2 $(( $1 + 320 )) $(( $2 - 220 )) 700; fi
+sleep 1
+shot tablet-1b-offcamera-resized
 
 # Make a symbol, draw two drawings inside it and mark them.
 tap_by content-desc "Add"

@@ -139,6 +139,22 @@ class Editor(app: Application) : AndroidViewModel(app) {
     var autoKey by mutableStateOf(false)
     var snap by mutableStateOf(true)
 
+    // ---------------------------------------------------------------- UI sizes (dragged by the user, in dp)
+    private val prefs = app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+    /** Height of the timeline's layer rows; 0 means the default for the screen size. */
+    var timelineRows by mutableFloatStateOf(prefs.getFloat("timelineRows", 0f))
+    var panelWidth by mutableFloatStateOf(prefs.getFloat("panelWidth", 340f))
+    /** Width of the layer-name column; 0 means the default. */
+    var headerWidth by mutableFloatStateOf(prefs.getFloat("headerWidth", 0f))
+
+    fun saveUi() {
+        prefs.edit()
+            .putFloat("timelineRows", timelineRows)
+            .putFloat("panelWidth", panelWidth)
+            .putFloat("headerWidth", headerWidth)
+            .apply()
+    }
+
     var viewScale by mutableFloatStateOf(0.3f)
     var viewOffset by mutableStateOf(Offset.Zero)
     var fitRequest by mutableIntStateOf(0)

@@ -10,7 +10,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -95,7 +97,7 @@ fun EditorScreen(ed: Editor) {
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Ui.Bar).windowInsetsPadding(WindowInsets.safeDrawing)) {
         val compact = maxWidth < 700.dp || maxHeight < 500.dp
-        val panelW = minOf(330.dp, maxWidth * 0.8f)
+        val panelW = minOf(ed.panelWidth.dp, maxWidth * 0.92f)
         val chrome = !ed.fullscreen
         Column(Modifier.fillMaxSize()) {
             if (chrome) TopBar(ed, compact)
@@ -128,11 +130,17 @@ fun EditorScreen(ed: Editor) {
                     // Phones: the panel slides over the canvas.
                     val page = ed.panel
                     if (compact && page != null && chrome) {
-                        RightPanel(ed, page, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(panelW))
+                        Row(Modifier.align(Alignment.CenterEnd).fillMaxHeight()) {
+                            PanelHandle(ed)
+                            RightPanel(ed, page, Modifier.fillMaxHeight().width(panelW))
+                        }
                     }
                 }
                 val page = ed.panel
-                if (!compact && page != null && chrome) RightPanel(ed, page, Modifier.width(340.dp).fillMaxHeight())
+                if (!compact && page != null && chrome) {
+                    PanelHandle(ed)
+                    RightPanel(ed, page, Modifier.width(panelW).fillMaxHeight())
+                }
                 if (chrome) RightSidebar(ed, compact)
             }
             if (chrome) Timeline(ed, compact, addAudio)
@@ -140,6 +148,27 @@ fun EditorScreen(ed: Editor) {
         if (ed.preview) Preview(ed)
         ed.textPrompt?.let { TextDialog(ed) }
         BusyOverlay(ed)
+    }
+}
+
+/** The right panel's left edge: drag it to make the panel wider or narrower. */
+@Composable
+private fun PanelHandle(ed: Editor) {
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .width(14.dp)
+            .background(Ui.Bar)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(onDragEnd = { ed.saveUi() }) { c, dx ->
+                    c.consume()
+                    ed.panelWidth = (ed.panelWidth - dx / density).coerceIn(240f, 640f)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.width(4.dp).height(40.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF4A4A4A)))
     }
 }
 

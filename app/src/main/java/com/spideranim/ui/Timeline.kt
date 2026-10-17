@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
@@ -105,11 +106,31 @@ fun Timeline(ed: Editor, compact: Boolean, onAddAudio: () -> Unit, modifier: Mod
 
 // ------------------------------------------------------------------ playback bar
 
+private fun defaultRows(compact: Boolean) = if (compact) 150.dp else 200.dp
+private fun defaultHeader(compact: Boolean) = if (compact) 116.dp else 220.dp
+
 @Composable
 private fun PlaybackBar(ed: Editor, compact: Boolean) {
     val b = if (compact) 40.dp else 46.dp
     var fpsMenu by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth().height(if (compact) 46.dp else 54.dp).background(Ui.Bar).padding(horizontal = 6.dp)) {
+    val density = LocalDensity.current.density
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(if (compact) 46.dp else 54.dp)
+            .background(Ui.Bar)
+            // Drag the bar up or down to resize the timeline.
+            .pointerInput(compact) {
+                detectVerticalDragGestures(onDragEnd = { ed.saveUi() }) { c, dy ->
+                    c.consume()
+                    val cur = if (ed.timelineRows > 0f) ed.timelineRows else defaultRows(compact).value
+                    ed.timelineRows = (cur - dy / density).coerceIn(48f, 720f)
+                    ed.timelineOpen = true
+                }
+            }
+            .padding(horizontal = 6.dp),
+    ) {
+        Box(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).width(40.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF4A4A4A)))
         Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically) {
             BarButton(Ic.PrevFrame, { ed.step(-1) }, size = b, description = "Previous frame")
             BarButton(Ic.NextFrame, { ed.step(1) }, size = b, description = "Next frame")
@@ -166,7 +187,7 @@ private fun Breadcrumb(ed: Editor, compact: Boolean) {
 @Composable
 private fun TimelineGrid(ed: Editor, compact: Boolean) {
     val density = LocalDensity.current
-    val headerW = if (compact) 116.dp else 220.dp
+    val headerW = if (ed.headerWidth > 0f) ed.headerWidth.dp else defaultHeader(compact)
     var cellPx by remember { mutableFloatStateOf(with(density) { (if (compact) 34.dp else 50.dp).toPx() }) }
     var scrollX by remember { mutableFloatStateOf(0f) }
     var scrollY by remember { mutableFloatStateOf(0f) }
@@ -185,7 +206,9 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
     val tops = rowPx.runningFold(0f) { a, b -> a + b }
     val totalH = tops.last()
     // Fixed height so the canvas above never jumps as rows come and go.
-    val visibleH = if (compact) 150.dp else 200.dp
+    // Never let the timeline squeeze the canvas away entirely.
+    val maxRows = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.55f).dp
+    val visibleH = (if (ed.timelineRows > 0f) ed.timelineRows.dp else defaultRows(compact)).coerceAtMost(maxRows)
 
     fun maxX() = max(0f, (ed.clip.length + 4) * cellPx - gridW)
     fun maxY() = max(0f, totalH - gridH)
@@ -209,8 +232,23 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
 
     // ---- ruler
     Row(Modifier.fillMaxWidth().height(RulerH + MarkerH)) {
-        Box(Modifier.width(headerW).fillMaxHeight().background(Ui.Timeline), contentAlignment = Alignment.TopStart) {
+        // Drag sideways here to widen or narrow the layer-name column.
+        Box(
+            Modifier
+                .width(headerW)
+                .fillMaxHeight()
+                .background(Ui.Timeline)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(onDragEnd = { ed.saveUi() }) { c, dx ->
+                        c.consume()
+                        val cur = if (ed.headerWidth > 0f) ed.headerWidth else defaultHeader(compact).value
+                        ed.headerWidth = (cur + dx / density.density).coerceIn(80f, 420f)
+                    }
+                },
+            contentAlignment = Alignment.TopStart,
+        ) {
             Text("Markers", style = Ui.tiny.copy(color = Ui.Faint), modifier = Modifier.padding(start = if (compact) 10.dp else 18.dp, top = 3.dp))
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).width(4.dp).height(22.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF4A4A4A)))
         }
         Canvas(
             Modifier

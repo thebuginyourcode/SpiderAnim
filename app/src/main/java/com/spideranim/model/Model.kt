@@ -46,8 +46,18 @@ class Stroke(
     ) = Stroke(kind, points, color, width, fill, closed)
 }
 
-/** One drawing inside a symbol. A symbol's drawings are what the Symbol Picker chooses between. */
-data class Drawing(val id: Long = Ids.next(), val strokes: List<Stroke> = emptyList())
+val MarkerColors = listOf(0xFF2F8CFF, 0xFFFF5C7A, 0xFFFFB23F, 0xFF34C77B, 0xFF9B6BFF, 0xFF27C2D6).map { it.toInt() }
+
+/**
+ * One drawing inside a symbol. A [marker] labels it ("A", "Blink"...) so the frame picker can
+ * select it by name, like ToonSquid's "Select from Markers".
+ */
+data class Drawing(
+    val id: Long = Ids.next(),
+    val strokes: List<Stroke> = emptyList(),
+    val marker: String? = null,
+    val markerColor: Int = MarkerColors[0],
+)
 
 data class Symbol(
     val id: Long = Ids.next(),
@@ -178,14 +188,24 @@ data class Xform(
 data class Keyframe(
     val frame: Int,
     val xf: Xform,
-    /** Which drawing of the layer's symbol is shown from this key on (held, never tweened). */
-    val symbolFrame: Int = 0,
     /** Ease applied on the tween leaving this keyframe. */
     val ease: Ease = Ease.Linear,
     val tween: Boolean = true,
 )
 
+/** A frame-picker key: from [frame] on, the layer shows drawing [drawing] of its symbol (held). */
+data class Pick(val frame: Int, val drawing: Int)
+
 data class Pose(val xf: Xform, val symbolFrame: Int)
+
+/** A timeline marker shown above the frame numbers, covering frames [from]..[to]. */
+data class Marker(
+    val id: Long = Ids.next(),
+    val from: Int,
+    val to: Int,
+    val comment: String,
+    val color: Int = MarkerColors[0],
+)
 
 data class Layer(
     val id: Long = Ids.next(),
@@ -194,8 +214,17 @@ data class Layer(
     val visible: Boolean = true,
     val locked: Boolean = false,
     val keyframes: List<Keyframe>,
+    val picks: List<Pick> = emptyList(),
+    val color: Int = MarkerColors[0],
 ) {
     fun keyAt(frame: Int): Keyframe? = keyframes.firstOrNull { it.frame == frame }
+    fun pickAt(frame: Int): Pick? = picks.firstOrNull { it.frame == frame }
+
+    fun drawingAt(frame: Int): Int =
+        (picks.lastOrNull { it.frame <= frame } ?: picks.firstOrNull())?.drawing ?: 0
+
+    fun withPick(frame: Int, drawing: Int): Layer =
+        copy(picks = (picks.filter { it.frame != frame } + Pick(frame, drawing)).sortedBy { it.frame })
 
     /** The keyframe at or before [frame] and the one after it, if any. */
     fun segmentAt(frame: Int): Pair<Keyframe, Keyframe?>? {
@@ -205,24 +234,25 @@ data class Layer(
         return keyframes[i] to keyframes.getOrNull(i + 1)
     }
 
-    fun poseAt(frame: Int): Pose {
-        if (keyframes.isEmpty()) return Pose(Xform(), 0)
+    fun xfAt(frame: Int): Xform {
+        if (keyframes.isEmpty()) return Xform()
         val i = keyframes.indexOfLast { it.frame <= frame }
-        if (i < 0) return Pose(keyframes[0].xf, keyframes[0].symbolFrame)
+        if (i < 0) return keyframes[0].xf
         val a = keyframes[i]
         val b = keyframes.getOrNull(i + 1)
-        if (b == null || !a.tween || frame == a.frame) return Pose(a.xf, a.symbolFrame)
+        if (b == null || !a.tween || frame == a.frame) return a.xf
         val t = (frame - a.frame).toFloat() / (b.frame - a.frame)
-        return Pose(a.xf.lerp(b.xf, a.ease.apply(t)), a.symbolFrame)
+        return a.xf.lerp(b.xf, a.ease.apply(t))
     }
+
+    fun poseAt(frame: Int): Pose = Pose(xfAt(frame), drawingAt(frame))
 
     /** Returns a copy whose keyframe at [frame] is [f] applied to the existing key, or to a key created from the current pose. */
     fun withKey(frame: Int, f: (Keyframe) -> Keyframe): Layer {
         val existing = keyAt(frame)
         val base = existing ?: run {
-            val pose = poseAt(frame)
             val seg = keyframes.lastOrNull { it.frame <= frame }
-            Keyframe(frame, pose.xf, pose.symbolFrame, seg?.ease ?: Ease.Linear, seg?.tween ?: true)
+            Keyframe(frame, xfAt(frame), seg?.ease ?: Ease.Linear, seg?.tween ?: true)
         }
         val updated = f(base)
         return copy(keyframes = (keyframes.filter { it.frame != frame } + updated).sortedBy { it.frame })
@@ -239,6 +269,7 @@ data class Project(
     val symbols: List<Symbol> = emptyList(),
     /** Bottom to top. */
     val layers: List<Layer> = emptyList(),
+    val markers: List<Marker> = emptyList(),
 ) {
     fun symbol(id: Long): Symbol? = symbols.firstOrNull { it.id == id }
     fun layer(id: Long?): Layer? = if (id == null) null else layers.firstOrNull { it.id == id }

@@ -15,8 +15,12 @@ import androidx.lifecycle.viewModelScope
 import com.spideranim.export.GifExporter
 import com.spideranim.model.Drawing
 import com.spideranim.model.Ease
+import com.spideranim.model.Ids
 import com.spideranim.model.Keyframe
 import com.spideranim.model.Layer
+import com.spideranim.model.Marker
+import com.spideranim.model.MarkerColors
+import com.spideranim.model.Pick
 import com.spideranim.model.Project
 import com.spideranim.model.ProjectJson
 import com.spideranim.model.Pt
@@ -39,30 +43,20 @@ import java.io.File
 import kotlin.math.hypot
 import kotlin.math.min
 
-enum class Tool(val label: String, val key: String) {
-    Select("Selection", "V"),
-    Transform("Free Transform", "Q"),
-    Brush("Brush", "B"),
-    Pencil("Pencil", "Y"),
-    Pen("Pen", "P"),
-    Line("Line", "N"),
-    Rect("Rectangle", "R"),
-    Oval("Oval", "O"),
-    Bucket("Paint Bucket", "K"),
-    Eraser("Eraser", "E"),
-    Dropper("Eyedropper", "I"),
-    Hand("Hand", "H"),
-    Zoom("Zoom", "Z"),
+enum class Tool(val label: String) {
+    Transform("Transform"),
+    Brush("Brush"),
+    Eraser("Eraser"),
+    Fill("Fill"),
+    Shape("Shape"),
+    Eyedropper("Eyedropper"),
 }
 
-val ToolGroups = listOf(
-    listOf(Tool.Select, Tool.Transform),
-    listOf(Tool.Brush, Tool.Pencil, Tool.Pen, Tool.Line, Tool.Rect, Tool.Oval),
-    listOf(Tool.Bucket, Tool.Eraser, Tool.Dropper),
-    listOf(Tool.Hand, Tool.Zoom),
-)
+enum class BrushStyle(val label: String) { Ink("Ink"), Pencil("Pencil") }
 
-enum class PanelTab(val label: String) { Properties("Properties"), Symbols("Symbols"), Picker("Picker"), Curves("Curves") }
+enum class ShapeKind(val label: String) { Line("Line"), Rect("Rectangle"), Oval("Ellipse"), Polygon("Polygon") }
+
+enum class InspectorTab(val label: String) { Layer("Layer"), Drawing("Drawing") }
 
 enum class ColorTarget { Stroke, Fill }
 
@@ -90,31 +84,38 @@ class EditorState(app: Application) : AndroidViewModel(app) {
     var selectedLayerId by mutableStateOf(project.layers.lastOrNull()?.id)
         private set
 
+    // ---- tools
     var tool by mutableStateOf(Tool.Brush)
         private set
-    var strokeColor by mutableIntStateOf(0xFF1C1D22.toInt())
-    var fillColor by mutableIntStateOf(0xFFFF7A45.toInt())
+    /** The tool whose options popover is open (tap the active tool again, as in ToonSquid). */
+    var toolOptions by mutableStateOf<Tool?>(null)
+    var brushStyle by mutableStateOf(BrushStyle.Ink)
+    var shapeKind by mutableStateOf(ShapeKind.Rect)
+    var strokeColor by mutableIntStateOf(0xFF1E1F24.toInt())
+    var fillColor by mutableIntStateOf(0xFF2F8CFF.toInt())
     var colorTarget by mutableStateOf(ColorTarget.Stroke)
     var brushSize by mutableFloatStateOf(10f)
-    var pencilSize by mutableFloatStateOf(3f)
-    var shapeWidth by mutableFloatStateOf(5f)
+    var brushOpacity by mutableFloatStateOf(1f)
     var eraserSize by mutableFloatStateOf(28f)
+    var shapeWidth by mutableFloatStateOf(5f)
     var smoothing by mutableFloatStateOf(0.45f)
     var pressure by mutableStateOf(true)
     var shapeFill by mutableStateOf(true)
-    var zoomOut by mutableStateOf(false)
 
+    // ---- playback & panels
     var onion by mutableStateOf(false)
     var loop by mutableStateOf(true)
     var playing by mutableStateOf(false)
+    var inspectorTab by mutableStateOf(InspectorTab.Layer)
+    var inspectorOpen by mutableStateOf(true)
 
-    var panel by mutableStateOf(PanelTab.Properties)
-
+    // ---- in-progress input
     var live by mutableStateOf<LiveStroke?>(null)
     val penPoints = mutableStateListOf<Pt>()
     var penLayerId by mutableStateOf<Long?>(null)
         private set
 
+    // ---- view
     var viewScale by mutableFloatStateOf(0.3f)
     var viewOffset by mutableStateOf(Offset.Zero)
     var canvasW = 0f
@@ -140,10 +141,17 @@ class EditorState(app: Application) : AndroidViewModel(app) {
     private var hintJob: Job? = null
 
     val selectedLayer: Layer? get() = project.layer(selectedLayerId)
+    val selectedSymbol: Symbol? get() = selectedLayer?.let { project.symbol(it.symbolId) }
+
+    /** Stroke colour with the brush opacity slider applied. */
+    val inkColor: Int
+        get() {
+            val a = ((strokeColor ushr 24) * brushOpacity).toInt().coerceIn(0, 255)
+            return (a shl 24) or (strokeColor and 0xFFFFFF)
+        }
 
     // ---------------------------------------------------------------- history
 
-    /** Records the current project as an undo step. Call once before a run of [update]s. */
     fun checkpoint() = pushHistory(project)
 
     fun pushHistory(snapshot: Project) {
@@ -165,7 +173,6 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         update(p)
     }
 
-    /** Abandons a gesture that already pushed [snapshot] as its undo step. */
     fun revertGesture(snapshot: Project, pushed: Boolean) {
         project = snapshot
         if (pushed && undoStack.isNotEmpty()) undoStack.removeLast()
@@ -205,6 +212,12 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         frame = f.coerceIn(0, project.length - 1)
     }
 
+    fun step(delta: Int) {
+        playing = false
+        val n = project.length
+        seek(((frame + delta) % n + n) % n)
+    }
+
     fun advanceFrame() {
         if (frame + 1 >= project.length) {
             if (loop) frame = 0 else playing = false
@@ -216,26 +229,17 @@ class EditorState(app: Application) : AndroidViewModel(app) {
     fun togglePlay() {
         if (!playing && !loop && frame >= project.length - 1) frame = 0
         playing = !playing
-    }
-
-    private fun keyFrames(): List<Int> {
-        val l = selectedLayer
-        return (l?.keyframes ?: project.layers.flatMap { it.keyframes }).map { it.frame }.distinct().sorted()
-    }
-
-    fun prevKey() {
-        playing = false
-        seek(keyFrames().lastOrNull { it < frame } ?: 0)
-    }
-
-    fun nextKey() {
-        playing = false
-        seek(keyFrames().firstOrNull { it > frame } ?: (project.length - 1))
+        toolOptions = null
     }
 
     fun selectTool(t: Tool) {
-        if (tool == Tool.Pen && t != Tool.Pen) finishPen(closed = false)
+        if (t == tool) {
+            toolOptions = if (toolOptions == t) null else t
+            return
+        }
+        if (tool == Tool.Shape) finishPen(closed = false)
         tool = t
+        toolOptions = null
     }
 
     fun selectLayer(id: Long?) {
@@ -267,10 +271,6 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         viewScale = ns
     }
 
-    fun zoomAt(screen: Offset, factor: Float) = panZoom(Offset.Zero, factor, screen)
-
-    fun zoomTo(scale: Float) = panZoom(Offset.Zero, scale / viewScale, Offset(canvasW / 2f, canvasH / 2f))
-
     // ---------------------------------------------------------------- feedback
 
     fun showHint(text: String) {
@@ -284,7 +284,6 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- layers
 
-    /** The selected layer if it can take new strokes, creating a first layer when the stage is empty. */
     fun drawableLayer(): Layer? {
         var l = selectedLayer
         if (l == null) {
@@ -311,6 +310,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         name = name ?: nextName("Layer", p.layers.map { it.name }),
         symbolId = sym.id,
         keyframes = listOf(Keyframe(0, Xform(p.width / 2f, p.height / 2f))),
+        color = MarkerColors[p.layers.size % MarkerColors.size],
     )
 
     private fun Project.insertAboveSelection(layer: Layer): Project {
@@ -320,7 +320,6 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         return copy(layers = list)
     }
 
-    /** New layer holding a fresh, empty symbol. */
     fun addLayer() {
         val sym = Symbol(name = nextName("Symbol", project.symbols.map { it.name }))
         val p = project.copy(symbols = project.symbols + sym)
@@ -329,7 +328,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         selectedLayerId = layer.id
     }
 
-    /** Places an instance of an existing symbol on a new layer (drag from Library in Animate). */
+    /** New layer showing an existing symbol; it shares the symbol's drawings and markers. */
     fun placeSymbol(symbolId: Long) {
         val sym = project.symbol(symbolId) ?: return
         val layer = newLayerFor(project, sym, sym.name)
@@ -347,7 +346,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun duplicateLayer(id: Long) {
         val l = project.layer(id) ?: return
-        val copy = l.copy(id = com.spideranim.model.Ids.next(), name = "${l.name} copy")
+        val copy = l.copy(id = Ids.next(), name = "${l.name} copy")
         val list = project.layers.toMutableList()
         list.add(list.indexOfFirst { it.id == id } + 1, copy)
         commit(project.copy(layers = list))
@@ -368,87 +367,110 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         commit(project.mapLayer(id) { it.copy(name = name.trim()) })
     }
 
+    fun setLayerColor(id: Long, color: Int) = commit(project.mapLayer(id) { it.copy(color = color) })
     fun toggleVisible(id: Long) = commit(project.mapLayer(id) { it.copy(visible = !it.visible) })
     fun toggleLock(id: Long) = commit(project.mapLayer(id) { it.copy(locked = !it.locked) })
 
-    // ---------------------------------------------------------------- symbols
-
-    fun newSymbol() {
-        val sym = Symbol(name = nextName("Symbol", project.symbols.map { it.name }))
-        val p = project.copy(symbols = project.symbols + sym)
-        val layer = newLayerFor(p, sym, sym.name)
-        commit(p.insertAboveSelection(layer))
-        selectedLayerId = layer.id
-        showHint("${sym.name} created — draw to fill it")
-    }
-
-    fun duplicateSymbol(id: Long) {
-        val s = project.symbol(id) ?: return
-        val copy = Symbol(name = "${s.name} copy", frames = s.frames.map { Drawing(strokes = it.strokes) })
-        commit(project.copy(symbols = project.symbols + copy))
-    }
-
-    fun renameSymbol(id: Long, name: String) {
-        if (name.isBlank()) return
-        commit(project.mapSymbol(id) { it.copy(name = name.trim()) })
-    }
-
-    fun usages(symbolId: Long) = project.layers.count { it.symbolId == symbolId }
-
-    fun deleteSymbol(id: Long) {
-        val n = usages(id)
-        if (n > 0) {
-            showHint("Used by $n layer${if (n == 1) "" else "s"} — swap or delete those first")
-            return
-        }
-        commit(project.copy(symbols = project.symbols.filter { it.id != id }))
-    }
-
-    /** Animate's "Swap Symbol": the layer keeps its motion but shows another symbol. */
     fun swapSymbol(layerId: Long, symbolId: Long) {
         val sym = project.symbol(symbolId) ?: return
         commit(project.mapLayer(layerId) { l ->
-            l.copy(symbolId = sym.id, keyframes = l.keyframes.map { it.copy(symbolFrame = it.symbolFrame.coerceIn(0, sym.frames.size - 1)) })
+            l.copy(symbolId = sym.id, picks = l.picks.map { it.copy(drawing = it.drawing.coerceIn(0, sym.frames.size - 1)) })
         })
     }
 
-    // ---------------------------------------------------------------- symbol picker
-
-    fun pickSymbolFrame(index: Int) {
-        val l = selectedLayer ?: return
-        commit(project.mapLayer(l.id) { it.withKey(frame) { k -> k.copy(symbolFrame = index) } })
+    fun renameSymbol(id: Long, name: String) {
+        if (name.isNotBlank()) commit(project.mapSymbol(id) { it.copy(name = name.trim()) })
     }
 
-    fun addSymbolFrame(duplicate: Boolean) {
+    // ---------------------------------------------------------------- frame picker
+
+    /** "Select from Markers": show drawing [index] from the playhead on. */
+    fun pickDrawing(index: Int) {
+        val l = selectedLayer ?: return showHint("Select a layer first")
+        if (l.drawingAt(frame) == index && l.pickAt(frame) != null) return
+        commit(project.mapLayer(l.id) { it.withPick(frame, index) })
+    }
+
+    fun removePick() {
+        val l = selectedLayer ?: return
+        if (l.pickAt(frame) == null) return showHint("No frame pick on this frame")
+        commit(project.mapLayer(l.id) { it.copy(picks = it.picks.filter { p -> p.frame != frame }) })
+    }
+
+    fun movePick(layerId: Long, from: Int, to: Int) {
+        update(project.mapLayer(layerId) { l ->
+            if (l.pickAt(to) != null) l
+            else l.copy(picks = l.picks.map { if (it.frame == from) it.copy(frame = to) else it }.sortedBy { it.frame })
+        })
+    }
+
+    fun addDrawing(duplicate: Boolean) {
+        val l = selectedLayer ?: return showHint("Select a layer first")
+        if (duplicate) return duplicateDrawing(l.drawingAt(frame))
+        val sym = project.symbol(l.symbolId) ?: return
+        appendDrawing(l, sym, Drawing(markerColor = MarkerColors[sym.frames.size % MarkerColors.size]))
+    }
+
+    /** Copies drawing [index] to the end of the symbol and shows the copy from the playhead on. */
+    fun duplicateDrawing(index: Int) {
         val l = selectedLayer ?: return
         val sym = project.symbol(l.symbolId) ?: return
-        val current = sym.frameAt(l.poseAt(frame).symbolFrame)
-        val d = if (duplicate) Drawing(strokes = current.strokes) else Drawing()
+        val src = sym.frameAt(index)
+        appendDrawing(l, sym, Drawing(strokes = src.strokes, marker = src.marker?.let { "$it 2" }, markerColor = src.markerColor))
+    }
+
+    private fun appendDrawing(l: Layer, sym: Symbol, d: Drawing) {
         val index = sym.frames.size
-        val p = project.mapSymbol(sym.id) { it.copy(frames = it.frames + d) }
-            .mapLayer(l.id) { it.withKey(frame) { k -> k.copy(symbolFrame = index) } }
-        commit(p)
+        commit(
+            project.mapSymbol(sym.id) { it.copy(frames = it.frames + d) }
+                .mapLayer(l.id) { it.withPick(frame, index) },
+        )
     }
 
-    fun deleteSymbolFrame(index: Int) {
-        val l = selectedLayer ?: return
-        val sym = project.symbol(l.symbolId) ?: return
-        if (sym.frames.size <= 1) {
-            showHint("A symbol needs at least one drawing")
-            return
-        }
+    fun deleteDrawing(index: Int) {
+        val sym = selectedSymbol ?: return
+        if (sym.frames.size <= 1) return showHint("A symbol needs at least one drawing")
         var p = project.mapSymbol(sym.id) { s -> s.copy(frames = s.frames.filterIndexed { i, _ -> i != index }) }
         p = p.copy(layers = p.layers.map { layer ->
-            if (layer.symbolId != sym.id) layer else layer.copy(keyframes = layer.keyframes.map { k ->
+            if (layer.symbolId != sym.id) layer else layer.copy(picks = layer.picks.map { k ->
                 when {
-                    k.symbolFrame > index -> k.copy(symbolFrame = k.symbolFrame - 1)
-                    k.symbolFrame == index -> k.copy(symbolFrame = (index - 1).coerceAtLeast(0))
+                    k.drawing > index -> k.copy(drawing = k.drawing - 1)
+                    k.drawing == index -> k.copy(drawing = (index - 1).coerceAtLeast(0))
                     else -> k
                 }
             })
         })
         commit(p)
     }
+
+    fun labelDrawing(index: Int, marker: String?, color: Int) {
+        val sym = selectedSymbol ?: return
+        commit(project.mapSymbol(sym.id) { s ->
+            s.mapFrame(index) { it.copy(marker = marker?.trim()?.ifBlank { null }, markerColor = color) }
+        })
+    }
+
+    // ---------------------------------------------------------------- timeline markers
+
+    fun addMarker() {
+        val existing = project.markers.firstOrNull { frame in it.from..it.to }
+        if (existing != null) return showHint("\"${existing.comment}\" already covers this frame")
+        val m = Marker(
+            from = frame,
+            to = frame,
+            comment = "Marker ${project.markers.size + 1}",
+            color = MarkerColors[project.markers.size % MarkerColors.size],
+        )
+        commit(project.copy(markers = (project.markers + m).sortedBy { it.from }))
+    }
+
+    fun updateMarker(m: Marker) {
+        val from = m.from.coerceIn(0, project.length - 1)
+        val fixed = m.copy(from = from, to = m.to.coerceIn(from, project.length - 1))
+        commit(project.copy(markers = project.markers.map { if (it.id == m.id) fixed else it }.sortedBy { it.from }))
+    }
+
+    fun deleteMarker(id: Long) = commit(project.copy(markers = project.markers.filter { it.id != id }))
 
     // ---------------------------------------------------------------- keyframes
 
@@ -465,10 +487,10 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         commit(project.mapLayer(l.id) { it.copy(keyframes = it.keyframes.filter { k -> k.frame != frame }) })
     }
 
-    fun toggleTween() {
+    fun setTween(on: Boolean) {
         val l = selectedLayer ?: return
         val (a, _) = l.segmentAt(frame) ?: return
-        commit(project.mapLayer(l.id) { it.withKey(a.frame) { k -> k.copy(tween = !k.tween) } })
+        commit(project.mapLayer(l.id) { it.withKey(a.frame) { k -> k.copy(tween = on) } })
     }
 
     fun setEase(layerId: Long, keyFrame: Int, ease: Ease) {
@@ -489,7 +511,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun resetTransform() {
         val l = selectedLayer ?: return
-        val cur = l.poseAt(frame).xf
+        val cur = l.xfAt(frame)
         commit(project.mapLayer(l.id) { it.withKey(frame) { k -> k.copy(xf = Xform(cur.x, cur.y)) } })
     }
 
@@ -497,14 +519,13 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun addStroke(layerId: Long, stroke: Stroke) {
         val l = project.layer(layerId) ?: return
-        val idx = l.poseAt(frame).symbolFrame
+        val idx = l.drawingAt(frame)
         commit(project.mapSymbol(l.symbolId) { s -> s.mapFrame(idx) { d -> d.copy(strokes = d.strokes + stroke) } })
     }
 
-    /** Applies the eraser without history; returns whether anything was removed. */
     fun eraseAt(layerId: Long, local: Pt, radius: Float): Boolean {
         val l = project.layer(layerId) ?: return false
-        val idx = l.poseAt(frame).symbolFrame
+        val idx = l.drawingAt(frame)
         val d = project.symbol(l.symbolId)?.frameAt(idx) ?: return false
         val result = eraseStrokes(d.strokes, local.x, local.y, radius) ?: return false
         update(project.mapSymbol(l.symbolId) { s -> s.mapFrame(idx) { it.copy(strokes = result) } })
@@ -513,9 +534,9 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun fillAt(stage: Pt) {
         val l = drawableLayer() ?: return
-        val xf = l.poseAt(frame).xf
+        val xf = l.xfAt(frame)
         val local = xf.toLocal(stage)
-        val idx = l.poseAt(frame).symbolFrame
+        val idx = l.drawingAt(frame)
         val d = project.drawingOf(l, frame) ?: return
         val gap = 24f / (viewScale * xf.avgScale)
         val hit = d.strokes.lastOrNull { it.fillable(gap) && insidePolygon(it.points, local.x, local.y) }
@@ -529,16 +550,15 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         })
     }
 
-    /** Eyedropper: strokes set the stroke colour, fills set the fill colour, like Animate. */
     fun sampleAt(stage: Pt, tolerance: Float) {
         for (l in project.layers.asReversed()) {
             if (!l.visible) continue
-            val xf = l.poseAt(frame).xf
+            val xf = l.xfAt(frame)
             val local = xf.toLocal(stage)
             val d = project.drawingOf(l, frame) ?: continue
             for (s in d.strokes.asReversed()) {
                 if (nearPolyline(s.points, s.closed, local.x, local.y, s.width / 2f + tolerance / xf.avgScale)) {
-                    strokeColor = s.color
+                    strokeColor = s.color or (0xFF shl 24)
                     colorTarget = ColorTarget.Stroke
                     return
                 }
@@ -552,11 +572,10 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Topmost visible, unlocked layer whose current drawing covers [stage]. */
     fun layerAt(stage: Pt, pad: Float): Layer? {
         for (l in project.layers.asReversed()) {
             if (!l.visible || l.locked) continue
-            val xf = l.poseAt(frame).xf
+            val xf = l.xfAt(frame)
             val local = xf.toLocal(stage)
             val b = project.drawingOf(l, frame)?.bounds() ?: continue
             if (b.contains(local.x, local.y, pad / xf.avgScale)) return l
@@ -564,7 +583,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    // ---------------------------------------------------------------- pen tool
+    // ---------------------------------------------------------------- polygon shape
 
     fun penTap(layer: Layer, local: Pt, closeRadius: Float) {
         if (penLayerId != layer.id) {
@@ -583,8 +602,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
     fun finishPen(closed: Boolean) {
         val id = penLayerId
         if (id != null && penPoints.size >= 2) {
-            val l = project.layer(id)
-            val scale = l?.poseAt(frame)?.xf?.avgScale ?: 1f
+            val scale = project.layer(id)?.xfAt(frame)?.avgScale ?: 1f
             addStroke(id, Stroke(
                 kind = StrokeKind.Pen,
                 points = penPoints.toList(),
@@ -693,36 +711,62 @@ class EditorState(app: Application) : AndroidViewModel(app) {
     }
 }
 
-/** The first-run scene: a squash-and-stretch ball, so the timeline and curves have something to show. */
+/**
+ * First-run scene: a bouncing ball, and a face whose mouth drawings are labelled with markers
+ * ("M", "A", "O") and switched by the frame picker, so both workflows have something to show.
+ */
 private object Demo {
     fun project(): Project {
-        val ink = 0xFF1C1D22.toInt()
+        val ink = 0xFF1E1F24.toInt()
+        val skin = 0xFFFFD9B8.toInt()
+        fun face(mouth: List<Stroke>) = listOf(
+            Stroke(StrokeKind.Oval, ovalPoints(-110f, -120f, 110f, 120f), ink, 6f, skin, true),
+            Stroke(StrokeKind.Oval, ovalPoints(-52f, -42f, -30f, -14f), ink, 2f, ink, true),
+            Stroke(StrokeKind.Oval, ovalPoints(30f, -42f, 52f, -14f), ink, 2f, ink, true),
+        ) + mouth
+        val faceSym = Symbol(
+            name = "Face",
+            frames = listOf(
+                Drawing(strokes = face(listOf(Stroke(StrokeKind.Line, listOf(Pt(-34f, 52f), Pt(34f, 52f)), ink, 6f))), marker = "M", markerColor = MarkerColors[0]),
+                Drawing(strokes = face(listOf(Stroke(StrokeKind.Oval, ovalPoints(-36f, 30f, 36f, 74f), ink, 6f, 0xFF8A2F3A.toInt(), true))), marker = "A", markerColor = MarkerColors[1]),
+                Drawing(strokes = face(listOf(Stroke(StrokeKind.Oval, ovalPoints(-18f, 34f, 18f, 76f), ink, 6f, 0xFF8A2F3A.toInt(), true))), marker = "O", markerColor = MarkerColors[2]),
+            ),
+        )
         val ball = Symbol(
             name = "Ball",
-            frames = listOf(
-                Drawing(strokes = listOf(Stroke(StrokeKind.Oval, ovalPoints(-70f, -70f, 70f, 70f), ink, 6f, 0xFFFF7A45.toInt(), true))),
-                Drawing(strokes = listOf(
-                    Stroke(StrokeKind.Oval, ovalPoints(-70f, -70f, 70f, 70f), ink, 6f, 0xFF4F7CFF.toInt(), true),
-                    Stroke(StrokeKind.Oval, ovalPoints(-40f, -44f, -8f, -20f), 0xFFFFFFFF.toInt(), 2f, 0xFFFFFFFF.toInt(), true),
-                )),
-            ),
+            frames = listOf(Drawing(strokes = listOf(Stroke(StrokeKind.Oval, ovalPoints(-60f, -60f, 60f, 60f), ink, 6f, 0xFF2F8CFF.toInt(), true)))),
         )
         val ground = Symbol(
             name = "Ground",
-            frames = listOf(Drawing(strokes = listOf(
-                Stroke(StrokeKind.Line, listOf(Pt(-520f, 0f), Pt(520f, 0f)), 0xFFD5D6DC.toInt(), 6f),
-            ))),
+            frames = listOf(Drawing(strokes = listOf(Stroke(StrokeKind.Line, listOf(Pt(-760f, 0f), Pt(760f, 0f)), 0xFFD5D6DC.toInt(), 6f)))),
         )
-        val groundLayer = Layer(name = "Ground", symbolId = ground.id, keyframes = listOf(Keyframe(0, Xform(960f, 846f))))
+        val groundLayer = Layer(name = "Ground", symbolId = ground.id, keyframes = listOf(Keyframe(0, Xform(960f, 846f))), color = MarkerColors[3])
+        val faceLayer = Layer(
+            name = "Face",
+            symbolId = faceSym.id,
+            keyframes = listOf(Keyframe(0, Xform(560f, 560f))),
+            picks = listOf(Pick(0, 0), Pick(4, 1), Pick(9, 2), Pick(14, 1), Pick(18, 0)),
+            color = MarkerColors[1],
+        )
         val ballLayer = Layer(
             name = "Ball",
             symbolId = ball.id,
             keyframes = listOf(
-                Keyframe(0, Xform(960f, 300f), ease = Ease.In),
-                Keyframe(12, Xform(960f, 782f, 1.18f, 0.84f), ease = Ease.Out),
-                Keyframe(24, Xform(960f, 300f)),
+                Keyframe(0, Xform(1340f, 300f), ease = Ease.In),
+                Keyframe(12, Xform(1340f, 786f, 1.18f, 0.84f), ease = Ease.Out),
+                Keyframe(24, Xform(1340f, 300f)),
+            ),
+            color = MarkerColors[0],
+        )
+        return Project(
+            name = "Hello",
+            length = 24,
+            symbols = listOf(faceSym, ball, ground),
+            layers = listOf(groundLayer, faceLayer, ballLayer),
+            markers = listOf(
+                Marker(from = 0, to = 11, comment = "Fall", color = MarkerColors[0]),
+                Marker(from = 12, to = 23, comment = "Rise", color = MarkerColors[4]),
             ),
         )
-        return Project(name = "Bouncing ball", length = 24, symbols = listOf(ball, ground), layers = listOf(groundLayer, ballLayer))
     }
 }

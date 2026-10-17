@@ -3,6 +3,7 @@ package com.spideranim
 import com.spideranim.model.Ease
 import com.spideranim.model.Keyframe
 import com.spideranim.model.Layer
+import com.spideranim.model.Pick
 import com.spideranim.model.Pt
 import com.spideranim.model.Stroke
 import com.spideranim.model.StrokeKind
@@ -38,13 +39,11 @@ class ModelTest {
     }
 
     @Test
-    fun poseInterpolatesWithEaseAndHoldsSymbolFrame() {
+    fun poseInterpolatesAndHoldsPickedDrawing() {
         val layer = Layer(
             name = "L", symbolId = 1,
-            keyframes = listOf(
-                Keyframe(0, Xform(0f, 0f), symbolFrame = 2),
-                Keyframe(10, Xform(100f, 50f), symbolFrame = 0),
-            ),
+            keyframes = listOf(Keyframe(0, Xform(0f, 0f)), Keyframe(10, Xform(100f, 50f))),
+            picks = listOf(Pick(0, 2), Pick(10, 0)),
         )
         assertEquals(50f, layer.poseAt(5).xf.x, 1e-3f)
         assertEquals(25f, layer.poseAt(5).xf.y, 1e-3f)
@@ -54,6 +53,17 @@ class ModelTest {
 
         val held = layer.withKey(0) { it.copy(tween = false) }
         assertEquals(0f, held.poseAt(9).xf.x, 1e-3f)
+    }
+
+    @Test
+    fun picksReplaceAtSameFrameAndStaySorted() {
+        val layer = Layer(name = "L", symbolId = 1, keyframes = listOf(Keyframe(0, Xform())))
+        assertEquals(0, layer.drawingAt(5))
+        val l2 = layer.withPick(8, 3).withPick(2, 1).withPick(8, 4)
+        assertEquals(listOf(Pick(2, 1), Pick(8, 4)), l2.picks)
+        assertEquals(1, l2.drawingAt(0)) // before the first pick, the first pick's drawing shows
+        assertEquals(1, l2.drawingAt(7))
+        assertEquals(4, l2.drawingAt(30))
     }
 
     @Test

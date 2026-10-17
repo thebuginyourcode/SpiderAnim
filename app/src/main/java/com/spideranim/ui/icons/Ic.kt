@@ -195,5 +195,10 @@ object Ic {
     val Swap by lazy { icon("swap", s("M5 8 H18"), s("M15 5 L18 8 L15 11"), s("M19 16 H6"), s("M9 13 L6 16 L9 19")) }
     val Layers by lazy { icon("layers", s("M12 4 L20.5 8.5 L12 13 L3.5 8.5 Z"), s("M3.5 12.5 L12 17 L20.5 12.5"), s("M3.5 16.5 L12 21 L20.5 16.5")) }
     val Place by lazy { icon("place", s(rounded(4.5f, 4.5f, 15f, 15f, 3f)), s("M12 8.5 V15.5"), s("M8.5 12 H15.5")) }
+    val Shape by lazy { icon("shape", s(circle(9.5f, 9.5f, 5.5f)), s(rounded(10.5f, 10.5f, 9f, 9f, 1.8f))) }
+    val Marker by lazy { icon("marker", s("M6 20.5 V4.5"), s("M6 5 H17.5 L15 8.75 L17.5 12.5 H6")) }
+    val Inspector by lazy { icon("inspector", s(rounded(3.5f, 4.5f, 17f, 15f, 2.5f)), s("M14.5 4.5 V19.5"), s("M16.8 8.5 H18"), s("M16.8 11.5 H18")) }
+    val PrevFrame by lazy { icon("prevframe", s("M14.5 6.5 L9 12 L14.5 17.5")) }
+    val NextFrame by lazy { icon("nextframe", s("M9.5 6.5 L15 12 L9.5 17.5")) }
     val Rename by lazy { icon("rename", s("M15.2 4.8 L19.2 8.8 L9 19 L4.5 19.5 L5 15 Z")) }
 }

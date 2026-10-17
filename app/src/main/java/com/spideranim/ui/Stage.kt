@@ -31,7 +31,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import com.spideranim.editor.BrushStyle
 import com.spideranim.editor.EditorState
+import com.spideranim.editor.ShapeKind
 import com.spideranim.editor.LiveStroke
 import com.spideranim.editor.Tool
 import com.spideranim.model.Bounds
@@ -158,7 +160,7 @@ private fun DrawScope.drawSelection(state: EditorState, ctrl: StageController, l
     drawLine(Ui.Accent, c - Offset(6f * unit, 0f), c + Offset(6f * unit, 0f), strokeWidth = 1.2f * unit)
     drawLine(Ui.Accent, c - Offset(0f, 6f * unit), c + Offset(0f, 6f * unit), strokeWidth = 1.2f * unit)
 
-    if (state.tool != Tool.Select && state.tool != Tool.Transform) return
+    if (state.tool != Tool.Transform) return
     val b = state.project.drawingOf(layer, state.frame)?.bounds() ?: return
     val corners = boxCorners(b).map { xf.toStage(it).offset() }
     val path = Path().apply {
@@ -309,25 +311,28 @@ class StageController(val state: EditorState) {
         travel = 0f
         mode = Mode.None
         val stage = toStage(pos)
-        when (val tool = state.tool) {
-            Tool.Brush, Tool.Pencil -> {
+        when (state.tool) {
+            Tool.Brush -> {
                 val l = state.drawableLayer() ?: return
                 xf0 = l.poseAt(state.frame).xf
-                val size = if (tool == Tool.Brush) state.brushSize else state.pencilSize
-                val kind = if (tool == Tool.Brush) StrokeKind.Brush else StrokeKind.Pencil
-                val ls = LiveStroke(l.id, kind, state.strokeColor, size / xf0.avgScale, null, false)
+                val kind = if (state.brushStyle == BrushStyle.Ink) StrokeKind.Brush else StrokeKind.Pencil
+                val ls = LiveStroke(l.id, kind, state.inkColor, state.brushSize / xf0.avgScale, null, false)
                 val p = xf0.toLocal(stage)
                 ls.points.add(Pt(p.x, p.y, if (state.pressure) pressure else 1f))
                 state.live = ls
                 layerId = l.id
                 mode = Mode.Draw
             }
-            Tool.Line, Tool.Rect, Tool.Oval -> {
+            Tool.Shape -> {
+                if (state.shapeKind == ShapeKind.Polygon) {
+                    mode = Mode.Tap
+                    return
+                }
                 val l = state.drawableLayer() ?: return
                 xf0 = l.poseAt(state.frame).xf
-                val kind = when (tool) {
-                    Tool.Line -> StrokeKind.Line
-                    Tool.Rect -> StrokeKind.Rect
+                val kind = when (state.shapeKind) {
+                    ShapeKind.Line -> StrokeKind.Line
+                    ShapeKind.Rect -> StrokeKind.Rect
                     else -> StrokeKind.Oval
                 }
                 val closed = kind != StrokeKind.Line
@@ -348,13 +353,12 @@ class StageController(val state: EditorState) {
                 mode = Mode.Erase
                 eraseAt(lastLocal)
             }
-            Tool.Pen, Tool.Bucket, Tool.Zoom -> mode = Mode.Tap
-            Tool.Dropper -> {
+            Tool.Fill -> mode = Mode.Tap
+            Tool.Eyedropper -> {
                 mode = Mode.Dropper
                 state.sampleAt(stage, 6f * dp / state.viewScale)
             }
-            Tool.Hand -> mode = Mode.Pan
-            Tool.Select, Tool.Transform -> beginSelect(pos, stage, tool == Tool.Transform)
+            Tool.Transform -> beginSelect(pos, stage, true)
         }
     }
 
@@ -500,16 +504,15 @@ class StageController(val state: EditorState) {
                 state.live = null
             }
             Mode.Tap -> if (tapped) when (state.tool) {
-                Tool.Bucket -> state.fillAt(stage)
-                Tool.Zoom -> state.zoomAt(lastScreen, if (state.zoomOut) 1f / 1.6f else 1.6f)
-                Tool.Pen -> {
+                Tool.Fill -> state.fillAt(stage)
+                Tool.Shape -> {
                     val l = state.drawableLayer()
                     if (l != null) {
                         val xf = l.poseAt(state.frame).xf
                         state.penTap(l, xf.toLocal(stage), 14f * dp / (state.viewScale * xf.avgScale))
                     }
                 }
-                Tool.Select, Tool.Transform -> state.selectLayer(null)
+                Tool.Transform -> state.selectLayer(null)
                 else -> Unit
             }
             else -> Unit

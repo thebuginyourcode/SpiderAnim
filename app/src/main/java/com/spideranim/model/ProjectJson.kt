@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 object ProjectJson {
 
     fun write(p: Project): String = JSONObject().apply {
-        put("version", 1)
+        put("version", 2)
         put("name", p.name)
         put("width", p.width)
         put("height", p.height)
@@ -17,6 +17,14 @@ object ProjectJson {
         put("background", p.background)
         put("symbols", JSONArray().apply { p.symbols.forEach { put(symbol(it)) } })
         put("layers", JSONArray().apply { p.layers.forEach { put(layer(it)) } })
+        put("markers", JSONArray().apply {
+            p.markers.forEach { m ->
+                put(JSONObject().apply {
+                    put("id", m.id); put("from", m.from); put("to", m.to)
+                    put("comment", m.comment); put("color", m.color)
+                })
+            }
+        })
     }.toString()
 
     fun read(text: String): Project {
@@ -32,6 +40,15 @@ object ProjectJson {
             background = o.optInt("background", 0xFFFFFFFF.toInt()),
             symbols = symbols,
             layers = layers.filter { l -> symbols.any { it.id == l.symbolId } },
+            markers = o.optJSONArray("markers")?.objects()?.map { m ->
+                Marker(
+                    id = m.getLong("id").also(Ids::seen),
+                    from = m.getInt("from"),
+                    to = m.getInt("to"),
+                    comment = m.optString("comment", ""),
+                    color = m.optInt("color", MarkerColors[0]),
+                )
+            } ?: emptyList(),
         )
     }
 
@@ -42,6 +59,8 @@ object ProjectJson {
             s.frames.forEach { d ->
                 put(JSONObject().apply {
                     put("id", d.id)
+                    d.marker?.let { put("marker", it) }
+                    put("markerColor", d.markerColor)
                     put("strokes", JSONArray().apply { d.strokes.forEach { put(stroke(it)) } })
                 })
             }
@@ -67,6 +86,8 @@ object ProjectJson {
         put("symbol", l.symbolId)
         put("visible", l.visible)
         put("locked", l.locked)
+        put("color", l.color)
+        put("picks", JSONArray().apply { l.picks.forEach { put(it.frame); put(it.drawing) } })
         put("keys", JSONArray().apply {
             l.keyframes.forEach { k ->
                 put(JSONObject().apply {
@@ -74,7 +95,6 @@ object ProjectJson {
                     put("x", k.xf.x.toDouble()); put("y", k.xf.y.toDouble())
                     put("sx", k.xf.sx.toDouble()); put("sy", k.xf.sy.toDouble())
                     put("r", k.xf.rot.toDouble()); put("a", k.xf.alpha.toDouble())
-                    put("sf", k.symbolFrame)
                     put("tw", k.tween)
                     put("ease", JSONArray().apply {
                         put(k.ease.x1.toDouble()); put(k.ease.y1.toDouble())
@@ -91,6 +111,8 @@ object ProjectJson {
             Drawing(
                 id = d.getLong("id").also(Ids::seen),
                 strokes = d.getJSONArray("strokes").objects().map(::readStroke),
+                marker = if (d.has("marker")) d.getString("marker") else null,
+                markerColor = d.optInt("markerColor", MarkerColors[0]),
             )
         }
         return Symbol(id, o.optString("name", "Symbol"), frames.ifEmpty { listOf(Drawing()) })
@@ -115,7 +137,13 @@ object ProjectJson {
     }
 
     private fun readLayer(o: JSONObject): Layer {
-        val keys = o.getJSONArray("keys").objects().map { k ->
+        val rawKeys = o.getJSONArray("keys").objects()
+        val picks = o.optJSONArray("picks")?.let { a -> List(a.length() / 2) { Pick(a.getInt(it * 2), a.getInt(it * 2 + 1)) } }
+            // Version 1 stored the shown drawing on each transform key.
+            ?: rawKeys.map { Pick(it.getInt("f"), it.optInt("sf", 0)) }
+                .sortedBy { it.frame }
+                .fold(emptyList<Pick>()) { acc, p -> if (acc.lastOrNull()?.drawing == p.drawing) acc else acc + p }
+        val keys = rawKeys.map { k ->
             val e = k.optJSONArray("ease")
             Keyframe(
                 frame = k.getInt("f"),
@@ -124,7 +152,6 @@ object ProjectJson {
                     k.getDouble("sx").toFloat(), k.getDouble("sy").toFloat(),
                     k.getDouble("r").toFloat(), k.getDouble("a").toFloat(),
                 ),
-                symbolFrame = k.optInt("sf", 0),
                 ease = if (e != null && e.length() == 4) Ease(
                     e.getDouble(0).toFloat(), e.getDouble(1).toFloat(),
                     e.getDouble(2).toFloat(), e.getDouble(3).toFloat(),
@@ -139,6 +166,8 @@ object ProjectJson {
             visible = o.optBoolean("visible", true),
             locked = o.optBoolean("locked", false),
             keyframes = keys.ifEmpty { listOf(Keyframe(0, Xform())) },
+            picks = picks.sortedBy { it.frame },
+            color = o.optInt("color", MarkerColors[0]),
         )
     }
 

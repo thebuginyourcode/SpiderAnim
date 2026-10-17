@@ -96,20 +96,22 @@ private fun PlaybackEffect(state: EditorState) {
 @Composable
 private fun TabletLayout(state: EditorState) {
     Column(Modifier.fillMaxSize()) {
-        TopBar(state, compact = false, onPanel = null)
+        TopBar(state, compact = false)
         Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp))) {
                 Stage(state)
-                ToolRail(state, Modifier.align(Alignment.CenterStart).padding(10.dp))
-                ToolOptions(state, Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 80.dp, end = 12.dp))
-                ZoomBadge(state, Modifier.align(Alignment.BottomEnd).padding(10.dp))
-                HintPill(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+                ZoomBadge(state, Modifier.align(Alignment.TopStart).padding(10.dp))
+                FramePickerBar(state, Modifier.align(Alignment.BottomCenter).padding(10.dp))
+                HintPill(state, Modifier.align(Alignment.TopCenter).padding(top = 14.dp))
+            }
+            AnimatedVisibility(state.inspectorOpen) {
+                Row {
+                    Spacer(Modifier.width(10.dp))
+                    Inspector(state, Modifier.width(300.dp).fillMaxHeight().floatingPanel())
+                }
             }
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.width(320.dp).fillMaxHeight().floatingPanel()) {
-                PanelTabs(state)
-                PanelContent(state, Modifier.weight(1f).fillMaxWidth())
-            }
+            Sidebar(state, compact = false, onInspector = { state.inspectorOpen = !state.inspectorOpen }, modifier = Modifier.fillMaxHeight())
         }
         Timeline(state, compact = false, modifier = Modifier.fillMaxWidth().padding(10.dp))
     }
@@ -120,25 +122,22 @@ private fun PhoneLayout(state: EditorState) {
     var sheet by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(state, compact = true, onPanel = { tab ->
-                state.panel = tab
-                sheet = true
-            })
+            TopBar(state, compact = true)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Stage(state)
-                ToolOptions(state, Modifier.align(Alignment.TopCenter).padding(horizontal = 8.dp, vertical = 6.dp))
-                ZoomBadge(state, Modifier.align(Alignment.BottomEnd).padding(8.dp))
-                HintPill(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp))
+                ZoomBadge(state, Modifier.align(Alignment.TopStart).padding(8.dp))
+                Sidebar(state, compact = true, onInspector = { sheet = true }, modifier = Modifier.align(Alignment.CenterEnd).padding(8.dp))
+                FramePickerBar(state, Modifier.align(Alignment.BottomStart).padding(8.dp).padding(end = 64.dp))
+                HintPill(state, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
             }
-            ToolStrip(state, Modifier.padding(horizontal = 8.dp).padding(top = 6.dp))
             Timeline(state, compact = true, modifier = Modifier.fillMaxWidth().padding(8.dp))
         }
-        PanelSheet(state, sheet) { sheet = false }
+        InspectorSheet(state, sheet) { sheet = false }
     }
 }
 
 @Composable
-private fun PanelSheet(state: EditorState, visible: Boolean, onDismiss: () -> Unit) {
+private fun InspectorSheet(state: EditorState, visible: Boolean, onDismiss: () -> Unit) {
     BackHandler(enabled = visible, onBack = onDismiss)
     AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut()) {
         Box(
@@ -149,7 +148,7 @@ private fun PanelSheet(state: EditorState, visible: Boolean, onDismiss: () -> Un
         )
     }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        val h = maxHeight * 0.66f
+        val h = maxHeight * 0.68f
         AnimatedVisibility(
             visible,
             enter = slideInVertically { it } + fadeIn(),
@@ -167,15 +166,14 @@ private fun PanelSheet(state: EditorState, visible: Boolean, onDismiss: () -> Un
                 Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Ui.Bg3))
                 }
-                PanelTabs(state)
-                PanelContent(state, Modifier.weight(1f).fillMaxWidth())
+                Inspector(state, Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
 }
 
 @Composable
-private fun TopBar(state: EditorState, compact: Boolean, onPanel: ((com.spideranim.editor.PanelTab) -> Unit)?) {
+private fun TopBar(state: EditorState, compact: Boolean) {
     var renaming by remember { mutableStateOf(false) }
     var newConfirm by remember { mutableStateOf(false) }
     val p = state.project
@@ -191,10 +189,7 @@ private fun TopBar(state: EditorState, compact: Boolean, onPanel: ((com.spideran
         }
         IconBtn(Ic.Undo, { state.undo() }, enabled = state.canUndo, size = 38.dp, description = "Undo")
         IconBtn(Ic.Redo, { state.redo() }, enabled = state.canRedo, size = 38.dp, description = "Redo")
-        if (onPanel != null) {
-            IconBtn(Ic.Picker, { onPanel(com.spideranim.editor.PanelTab.Picker) }, size = 38.dp, description = "Symbol Picker")
-            IconBtn(Ic.Sliders, { onPanel(state.panel) }, size = 38.dp, description = "Panels")
-        } else {
+        if (!compact) {
             VHairline(Modifier.padding(horizontal = 6.dp))
             ExportButton(state)
         }
@@ -243,7 +238,7 @@ private fun ExportButton(state: EditorState) {
 private fun LogoMark() {
     Canvas(Modifier.size(28.dp)) {
         drawRoundRect(
-            Brush.linearGradient(listOf(Color(0xFFFF9A5C), Ui.Accent, Color(0xFFE8503A)), Offset.Zero, Offset(size.width, size.height)),
+            Brush.linearGradient(listOf(Color(0xFF5AA8FF), Ui.Accent, Color(0xFF1E6FE0)), Offset.Zero, Offset(size.width, size.height)),
             cornerRadius = CornerRadius(size.width * 0.3f),
         )
         val w = size.width

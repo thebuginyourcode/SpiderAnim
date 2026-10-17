@@ -9,18 +9,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 object Ui {
-    val Bg0 = Color(0xFF0C0D10)
-    val Bg1 = Color(0xFF15161A)
-    val Bg2 = Color(0xFF1D1F24)
-    val Bg3 = Color(0xFF272A30)
-    val Line = Color(0xFF2A2D34)
-    val Text = Color(0xFFECEDEF)
-    val TextDim = Color(0xFF9EA2AC)
-    val TextFaint = Color(0xFF61656E)
-    val Accent = Color(0xFFFF7A45)
-    val AccentSoft = Color(0x2EFF7A45)
-    val OnionPrev = Color(0xFFFF4D6A)
-    val OnionNext = Color(0xFF2FC79A)
+    // Neutral greys; the artwork and the track colours carry the colour, not the chrome.
+    val Bg0 = Color(0xFF1C1D20) // workspace around the stage
+    val Bg1 = Color(0xFF26272B) // panels
+    val Bg2 = Color(0xFF303135) // controls
+    val Bg3 = Color(0xFF3B3C41) // pressed / selected controls
+    val Line = Color(0xFF38393E)
+    val Text = Color(0xFFF4F4F6)
+    val TextDim = Color(0xFFB3B5BC)
+    val TextFaint = Color(0xFF7A7C84)
+    val Accent = Color(0xFF2F8CFF)
+    val AccentSoft = Color(0x332F8CFF)
+    val OnionPrev = Color(0xFFFF5C7A)
+    val OnionNext = Color(0xFF34C77B)
 
     val title = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Text, letterSpacing = 0.1.sp)
     val body = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, color = Text)

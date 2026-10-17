@@ -194,7 +194,7 @@ private fun TimelineBody(state: EditorState, cellW: Dp, rowH: Dp, nameW: Dp, mod
                         awaitEachGesture {
                             val down = awaitFirstDown()
                             state.playing = false
-                            fun set(x: Float) = state.setFrame(((x + scrollX) / cellPx).toInt())
+                            fun set(x: Float) = state.seek(((x + scrollX) / cellPx).toInt())
                             set(down.position.x)
                             down.consume()
                             drag(down.id) {
@@ -282,7 +282,7 @@ private fun TimelineBody(state: EditorState, cellW: Dp, rowH: Dp, nameW: Dp, mod
                                     if (mode == 0) {
                                         state.playing = false
                                         if (layer != null) state.selectLayer(layer.id)
-                                        state.setFrame(f0)
+                                        state.seek(f0)
                                     }
                                     break
                                 }
@@ -308,7 +308,7 @@ private fun TimelineBody(state: EditorState, cellW: Dp, rowH: Dp, nameW: Dp, mod
                                             }
                                             state.moveKeyframe(l.id, keyFrame, nf)
                                             keyFrame = nf
-                                            state.setFrame(nf)
+                                            state.seek(nf)
                                         }
                                         ch.consume()
                                     }

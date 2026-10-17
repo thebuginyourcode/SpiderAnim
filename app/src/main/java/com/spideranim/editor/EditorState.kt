@@ -201,7 +201,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- navigation
 
-    fun setFrame(f: Int) {
+    fun seek(f: Int) {
         frame = f.coerceIn(0, project.length - 1)
     }
 
@@ -225,12 +225,12 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun prevKey() {
         playing = false
-        setFrame(keyFrames().lastOrNull { it < frame } ?: 0)
+        seek(keyFrames().lastOrNull { it < frame } ?: 0)
     }
 
     fun nextKey() {
         playing = false
-        setFrame(keyFrames().firstOrNull { it > frame } ?: (project.length - 1))
+        seek(keyFrames().firstOrNull { it > frame } ?: (project.length - 1))
     }
 
     fun selectTool(t: Tool) {
@@ -604,7 +604,7 @@ class EditorState(app: Application) : AndroidViewModel(app) {
 
     fun setLength(length: Int) {
         commit(project.copy(length = length.coerceIn(1, 2000)))
-        setFrame(frame)
+        seek(frame)
     }
 
     fun setBackground(color: Int) = commit(project.copy(background = color))

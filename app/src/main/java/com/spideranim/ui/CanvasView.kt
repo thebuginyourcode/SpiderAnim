@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,15 +61,26 @@ fun CanvasView(ed: Editor, modifier: Modifier = Modifier) {
     val ctrl = remember(ed) { CanvasController(ed) }
     ctrl.dp = dp
     var size by remember { mutableStateOf(IntSize.Zero) }
-    LaunchedEffect(size, ed.fitRequest, ed.project.width, ed.project.height) {
-        if (size.width > 0 && size.height > 0) ed.fitView(size.width.toFloat(), size.height.toFloat(), 0f)
+    var fitted by remember { mutableIntStateOf(-1) }
+    // Fit only when asked (opening, entering a symbol, the fit button); panels opening or closing
+    // just keep the stage centred where it was instead of re-zooming.
+    LaunchedEffect(size, ed.fitRequest) {
+        if (size.width > 0 && size.height > 0 && fitted != ed.fitRequest) {
+            ed.fitView(size.width.toFloat(), size.height.toFloat(), 0f)
+            fitted = ed.fitRequest
+        }
     }
 
     Canvas(
         modifier
             .fillMaxSize()
             .clipToBounds()
-            .onSizeChanged { size = it }
+            .onSizeChanged { n ->
+                if (size != IntSize.Zero && fitted == ed.fitRequest) {
+                    ed.viewOffset += Offset((n.width - size.width) / 2f, (n.height - size.height) / 2f)
+                }
+                size = n
+            }
             .pointerInput(ed) { canvasGestures(ctrl) },
     ) {
         val p = ed.project
@@ -251,7 +263,7 @@ private suspend fun PointerInputScope.canvasGestures(ctrl: CanvasController) {
 class CanvasController(val ed: Editor) {
     var dp = 1f
 
-    private enum class Mode { None, Draw, Erase, Tap, Dropper, Move, Scale, Rotate, Lasso, LassoMove }
+    private enum class Mode { None, Draw, Erase, Tap, SymbolTap, Dropper, Move, Scale, Rotate, Lasso, LassoMove }
 
     private var mode = Mode.None
     private var startScreen = Offset.Zero
@@ -344,6 +356,18 @@ class CanvasController(val ed: Editor) {
         mode = Mode.None
         guide = null
         val c = clipOf(pos)
+        val sel = ed.selLayer
+        if (ed.tool != Tool.Select && sel != null && sel.type == LayerType.Symbol) {
+            // Drawing tools on a symbol layer: double-tap goes inside the symbol to draw there.
+            if (time - lastTapTime < 400 && (pos - lastTapPos).getDistance() < 40f * dp) {
+                lastTapTime = 0
+                ed.enterSymbol(sel.symbolId)
+                return
+            }
+            ed.showHint("Double-tap to edit ${sel.name}")
+            mode = Mode.SymbolTap
+            return
+        }
         when (ed.tool) {
             Tool.Brush -> {
                 val l = ed.drawTarget() ?: return
@@ -541,7 +565,7 @@ class CanvasController(val ed: Editor) {
                 val a = atan2(c.y - center0.y, c.x - center0.x)
                 ed.setXf(layerId ?: return, pinned(xf0.copy(rot = xf0.rot + Math.toDegrees((a - a0).toDouble()).toFloat())))
             }
-            Mode.Tap, Mode.None -> Unit
+            Mode.Tap, Mode.SymbolTap, Mode.None -> Unit
         }
     }
 
@@ -602,7 +626,7 @@ class CanvasController(val ed: Editor) {
                 }
                 else -> Unit
             }
-            Mode.Move -> if (tapped) {
+            Mode.Move, Mode.SymbolTap -> if (tapped) {
                 lastTapTime = time
                 lastTapPos = lastScreen
             }

@@ -383,7 +383,56 @@ fun TextInput(value: String, onChange: (String) -> Unit, modifier: Modifier = Mo
     )
 }
 
-/** A dialog card in the app's style, with right-aligned text buttons. */
+private val PopoverBg = Color(0xFF2C2C2C)
+
+/** Centred in the window. */
+private object CenterInWindow : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ) = androidx.compose.ui.unit.IntOffset(
+        ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(0),
+        ((windowSize.height - popupContentSize.height) / 2).coerceAtLeast(0),
+    )
+}
+
+/** Below the anchor (or above it when there is no room), kept inside the window. */
+private object NearAnchor : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ): androidx.compose.ui.unit.IntOffset {
+        val x = anchorBounds.left.coerceAtMost(windowSize.width - popupContentSize.width - 8).coerceAtLeast(8)
+        var y = anchorBounds.bottom + 6
+        if (y + popupContentSize.height > windowSize.height - 8) y = anchorBounds.top - popupContentSize.height - 6
+        return androidx.compose.ui.unit.IntOffset(x, y.coerceAtLeast(8))
+    }
+}
+
+/** An in-app popover card: no system dialog window, just the editor's own panel style. */
+@Composable
+private fun Popover(provider: androidx.compose.ui.window.PopupPositionProvider, onDismiss: () -> Unit, width: Dp, content: @Composable ColumnScope.() -> Unit) {
+    androidx.compose.ui.window.Popup(
+        popupPositionProvider = provider,
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    ) {
+        Column(
+            Modifier
+                .width(width)
+                .clip(RoundedCornerShape(14.dp))
+                .background(PopoverBg)
+                .border(1.dp, Color(0xFF3C3C3C), RoundedCornerShape(14.dp)),
+            content = content,
+        )
+    }
+}
+
+/** A titled card with text buttons at the bottom right (rename, marker editing…). */
 @Composable
 fun AppDialog(
     title: String,
@@ -391,15 +440,8 @@ fun AppDialog(
     actions: List<Pair<String, () -> Unit>>,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .width(340.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF2A2A2A))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+    Popover(CenterInWindow, onDismiss, 340.dp) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(title, style = Ui.body.copy(fontSize = 19.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = Color.White))
             content()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -409,18 +451,41 @@ fun AppDialog(
     }
 }
 
-/** A dropdown of text actions anchored to [anchor]. */
 @Composable
-fun ActionMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
-    androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
-        items.forEach { (label, action) ->
-            androidx.compose.material3.DropdownMenuItem(
-                text = { Text(label, style = Ui.body) },
-                onClick = {
+private fun MenuItems(items: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit) {
+    items.forEach { (label, action) ->
+        Text(
+            label,
+            style = Ui.body.copy(fontSize = 16.sp, color = if (label.startsWith("Delete")) Ui.Red else Ui.Text),
+            maxLines = 1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
                     onDismiss()
                     action()
-                },
-            )
-        }
+                }
+                .padding(horizontal = 18.dp, vertical = 12.dp),
+        )
+    }
+}
+
+/** A menu that drops from the composable it is placed next to. */
+@Composable
+fun ActionMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    if (!open) return
+    Popover(NearAnchor, onDismiss, 230.dp) {
+        Spacer(Modifier.height(6.dp))
+        MenuItems(items, onDismiss)
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+/** A titled menu in the middle of the window (layer, drawing and project options). */
+@Composable
+fun ActionSheet(title: String, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    Popover(CenterInWindow, onDismiss, 280.dp) {
+        Text(title, style = Ui.small.copy(color = Ui.Faint), maxLines = 1, modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 4.dp))
+        MenuItems(items, onDismiss)
+        Spacer(Modifier.height(6.dp))
     }
 }

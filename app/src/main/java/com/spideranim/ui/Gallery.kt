@@ -62,7 +62,7 @@ fun GalleryScreen(ed: Editor) {
         Row(Modifier.fillMaxWidth().height(64.dp).background(Ui.Bar).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Projects", style = Ui.body.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White), modifier = Modifier.weight(1f))
             Row(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(Ui.TealButton).clickable { creating = true }.padding(horizontal = 14.dp, vertical = 9.dp),
+                Modifier.clip(RoundedCornerShape(10.dp)).clickable { creating = true }.padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Ic.Plus, null, tint = Color.White, modifier = Modifier.size(18.dp))

@@ -176,7 +176,6 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
     var drawingMenu by remember { mutableStateOf<Pair<Long, Int>?>(null) }
     var layerMenu by remember { mutableStateOf<Layer?>(null) }
     var renaming by remember { mutableStateOf<Layer?>(null) }
-    var rulerMenu by remember { mutableIntStateOf(-1) }
     val measurer = rememberTextMeasurer()
     val cameraPainter = rememberVectorPainter(Ic.Camera)
 
@@ -185,9 +184,8 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
     val rowPx = rows.map { with(density) { it.height.toPx() } }
     val tops = rowPx.runningFold(0f) { a, b -> a + b }
     val totalH = tops.last()
-    val cap = if (compact) 160.dp else 230.dp
-    val visibleH = with(density) { totalH.toDp() }.coerceIn(MainRow, cap)
-    val hasMarkers = clip.markers.isNotEmpty()
+    // Fixed height so the canvas above never jumps as rows come and go.
+    val visibleH = if (compact) 150.dp else 200.dp
 
     fun maxX() = max(0f, (ed.clip.length + 4) * cellPx - gridW)
     fun maxY() = max(0f, totalH - gridH)
@@ -210,44 +208,46 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
     }
 
     // ---- ruler
-    Row(Modifier.fillMaxWidth().height(if (hasMarkers) RulerH + MarkerH else RulerH)) {
-        Box(Modifier.width(headerW).fillMaxHeight().background(Ui.Timeline))
+    Row(Modifier.fillMaxWidth().height(RulerH + MarkerH)) {
+        Box(Modifier.width(headerW).fillMaxHeight().background(Ui.Timeline), contentAlignment = Alignment.TopStart) {
+            Text("Markers", style = Ui.tiny.copy(color = Ui.Faint), modifier = Modifier.padding(start = if (compact) 10.dp else 18.dp, top = 3.dp))
+        }
         Canvas(
             Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .clipToBounds()
-                .pointerInput(ed, cellPx, hasMarkers) {
-                    val markerPx = if (hasMarkers) MarkerH.toPx() else 0f
+                .pointerInput(ed, cellPx) {
+                    val markerPx = MarkerH.toPx()
+                    val slop = viewConfiguration.touchSlop
                     awaitEachGesture {
                         val down = awaitFirstDown()
-                        val f = ((down.position.x + scrollX) / cellPx).toInt()
-                        if (down.position.y < markerPx) {
-                            val m = ed.clip.markers.firstOrNull { f in it.from..it.to }
-                            if (m != null) {
-                                down.consume()
-                                markerEdit = m
-                                return@awaitEachGesture
-                            }
-                        }
-                        ed.stop()
-                        fun set(x: Float) = ed.seek(((x + scrollX) / cellPx).toInt())
-                        set(down.position.x)
                         down.consume()
-                        val moved = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                            drag(down.id) { set(it.position.x); it.consume() }
-                            true
+                        ed.stop()
+                        fun frameAt(x: Float) = ((x + scrollX) / cellPx).toInt().coerceIn(0, ed.clip.length - 1)
+                        val inLane = down.position.y < markerPx
+                        // The number row scrubs straight away; the marker lane scrubs once you drag.
+                        if (!inLane) ed.seek(frameAt(down.position.x))
+                        var moved = false
+                        var travel = 0f
+                        drag(down.id) { c ->
+                            travel += kotlin.math.abs(c.position.x - c.previousPosition.x)
+                            if (!inLane || travel > slop) {
+                                moved = true
+                                ed.seek(frameAt(c.position.x))
+                            }
+                            c.consume()
                         }
-                        if (moved == null) {
-                            // Held still: marker menu for this frame.
-                            rulerMenu = f.coerceIn(0, ed.clip.length - 1)
-                            drag(down.id) { it.consume() }
+                        if (inLane && !moved) {
+                            val f = frameAt(down.position.x)
+                            markerEdit = ed.clip.markers.firstOrNull { f in it.from..it.to } ?: ed.addMarker(f)
                         }
                     }
                 },
         ) {
             val sx = scrollX.coerceIn(0f, maxX())
-            val markerPx = if (hasMarkers) MarkerH.toPx() else 0f
+            val markerPx = MarkerH.toPx()
+            drawRect(Color(0xFF161616), Offset.Zero, Size(size.width, markerPx))
             val first = (sx / cellPx).toInt()
             val last = ((sx + size.width) / cellPx).toInt() + 1
             val len = ed.clip.length
@@ -555,13 +555,6 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
     }
 
     markerEdit?.let { m -> MarkerDialog(ed, m) { markerEdit = null } }
-    if (rulerMenu >= 0) {
-        val f = rulerMenu
-        val existing = ed.clip.markers.firstOrNull { f in it.from..it.to }
-        ActionSheet("Frame ${f + 1}", { rulerMenu = -1 }, buildList {
-            if (existing == null) add("Add Marker" to { ed.addMarker(f) }) else add("Edit Marker" to { markerEdit = existing })
-        })
-    }
     drawingMenu?.let { (layerId, f) ->
         ActionSheet("Drawing", { drawingMenu = null }, listOf(
             "Duplicate" to { ed.selectLayer(layerId); ed.seek(f); ed.addDrawing(copy = true) },
@@ -647,6 +640,9 @@ private fun LayerHeader(ed: Editor, layer: Layer, compact: Boolean, onLongPress:
             modifier = Modifier.weight(1f),
         )
         if (layer.locked) Icon(Ic.Lock, "Locked", tint = Ui.Dim, modifier = Modifier.size(16.dp))
+        if (layer.type == LayerType.Symbol) {
+            BarButton(Ic.Chevron, { ed.enterSymbol(layer.symbolId) }, size = 34.dp, iconSize = 20.dp, description = "Open ${layer.name}")
+        }
         val icon = if (layer.type == LayerType.Audio) (if (layer.visible) Ic.Speaker else Ic.Mute) else (if (layer.visible) Ic.Eye else Ic.EyeOff)
         BarButton(icon, { ed.toggleVisible(layer.id) }, size = 38.dp, iconSize = 24.dp, tint = if (layer.visible) Color.White else Ui.Faint, description = "Visibility")
     }
@@ -690,7 +686,7 @@ private fun BottomBar(ed: Editor, compact: Boolean, onAddAudio: () -> Unit) {
                 add("Text" to { ed.selectTool(Tool.Text); ed.showHint("Tap the canvas to place text") })
                 if (!ed.inSymbol) add("Camera" to { ed.addCameraLayer() })
                 if (!ed.inSymbol) add("Audio…" to onAddAudio)
-                add("Marker" to { ed.addMarker() })
+                add("Marker" to { ed.addMarker(); Unit })
             })
         }
         if (!compact) Spacer(Modifier.width(150.dp))
@@ -726,28 +722,6 @@ private fun BottomBar(ed: Editor, compact: Boolean, onAddAudio: () -> Unit) {
 }
 
 // ------------------------------------------------------------------ menus & dialogs
-
-@Composable
-fun ActionSheet(title: String, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF2A2A2A)).padding(vertical = 8.dp)) {
-            Text(title, style = Ui.small.copy(color = Ui.Faint), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            items.forEach { (label, action) ->
-                Text(
-                    label,
-                    style = Ui.body.copy(fontSize = 17.sp, color = if (label.startsWith("Delete")) Ui.Red else Ui.Text),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            action()
-                        }
-                        .padding(horizontal = 20.dp, vertical = 13.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun LayerMenu(ed: Editor, layer: Layer, onRename: () -> Unit, onDismiss: () -> Unit) {

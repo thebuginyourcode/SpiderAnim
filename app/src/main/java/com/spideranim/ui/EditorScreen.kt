@@ -104,6 +104,24 @@ fun EditorScreen(ed: Editor) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     CanvasView(ed)
                     HintPill(ed, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+                    if (ed.inSymbol && chrome) {
+                        // Inside a symbol: a clear way back out, like ToonSquid's breadcrumb.
+                        val parent = ed.crumbs[ed.crumbs.size - 2]
+                        Row(
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xE6232323))
+                                .clickable { ed.exitTo(ed.path.size - 1) }
+                                .padding(start = 6.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Icon(Ic.Back, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Text(parent.name, style = Ui.body.copy(color = Color.White))
+                            Text("  ·  editing ${ed.clip.name}", style = Ui.body.copy(color = Ui.Dim))
+                        }
+                    }
                     if (ed.fullscreen) {
                         BarButton(Ic.Expand, { ed.fullscreen = false }, Modifier.align(Alignment.TopEnd).padding(8.dp), description = "Exit full screen")
                     }

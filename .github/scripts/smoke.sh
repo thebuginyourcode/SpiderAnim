@@ -36,29 +36,43 @@ launch() {
 # ---- tablet (landscape)
 adb shell wm size 2560x1600
 adb shell wm density 320
-launch --ez openLatest true
-shot tablet-1-editor
-adb shell input swipe 1000 450 1500 650 500
-sleep 1
-tap_by text "Mouth"
-tap_by content-desc "Properties"
-shot tablet-2-properties
+launch
+shot tablet-0-gallery
+tap_by text "New Project"
+tap_by text "Create"
+sleep 2
+adb shell input swipe 1000 380 1400 520 400
+tap_by text "Add Drawing"
+adb shell input swipe 1000 520 1400 380 400
+shot tablet-1-frames
+
+# Make a symbol, draw two drawings inside it and mark them.
+tap_by content-desc "Add"
+tap_by text "Symbol…"
+tap_by content-desc "New symbol"
+adb shell input swipe 1100 400 1300 420 300
+tap_by content-desc "Add"
+tap_by text "Marker"
+tap_by text "Add Drawing"
+adb shell input swipe 1100 380 1300 480 300
+tap_by content-desc "Add"
+tap_by text "Marker"
+shot tablet-2-in-symbol
+tap_by text "Scene 1"
+
+# Place it and pick a frame by marker.
+tap_by text "Library"
+tap_by text "Symbol 1"
+shot tablet-3-placed
 tap_by text "Markers"
-shot tablet-3-markers
-tap_by text "O"
+shot tablet-4-markers
+tap_by text "Marker 2"
 tap_by content-desc "Play"
 sleep 3
 tap_by content-desc "Play"
-tap_by content-desc "Properties"
-tap_by text "Mouth"
-tap_by text "Edit Symbol"
-shot tablet-4-in-symbol
-adb shell input swipe 1100 500 1400 520 300
-tap_by text "Add Drawing"
-shot tablet-5-new-drawing
+tap_by content-desc "Open Symbol 1"
+shot tablet-5-entered
 tap_by text "Scene 1"
-tap_by text "Library"
-shot tablet-6-library
 tap_by text "Actions"
 tap_by text "Export GIF"
 sleep 25
@@ -70,8 +84,11 @@ adb shell wm size 1080x2340
 adb shell wm density 440
 launch --ez openLatest true
 shot phone-1-editor
+tap_by content-desc "Add"
+shot phone-2-menu
+adb shell input keyevent KEYCODE_BACK
 launch
-shot phone-2-gallery
+shot phone-3-gallery
 
 adb shell wm size reset
 adb shell wm density reset

@@ -163,18 +163,4 @@ class ModelTest {
         assertEquals(1 to 2, e.start to e.length)
         assertEquals(3f, e.strokes.single().points[0].x, 1e-3f)
     }
-
-    @Test
-    fun demoProjectIsConsistent() {
-        val p = com.spideranim.model.Demo.project()
-        val mouth = p.scene.layers.first { it.type == LayerType.Symbol }
-        val sym = p.clip(mouth.symbolId)!!
-        assertEquals(sym.length, sym.markers.size)
-        assertEquals(2, p.symbolFrame(mouth, 9)) // "O" picked at frame 8
-        assertNotNull(p.clipBounds(p.scene, 0))
-        val back = ProjectJson.read(ProjectJson.write(p))
-        assertEquals(p.scene.layers.map { it.tracks }, back.scene.layers.map { it.tracks })
-        assertEquals(p.scene.layers[0].exposures.single().strokes.size, back.scene.layers[0].exposures.single().strokes.size)
-        assertEquals(sym.markers, back.clip(sym.id)!!.markers)
-    }
 }

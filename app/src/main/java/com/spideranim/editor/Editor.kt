@@ -84,7 +84,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
     val audio = AudioEngine(this)
 
     // ---------------------------------------------------------------- gallery
-    var gallery by mutableStateOf(seedDemo())
+    var gallery by mutableStateOf(removeDemo())
         private set
     var isOpen by mutableStateOf(false)
         private set
@@ -189,16 +189,12 @@ class Editor(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- projects
 
-    /** Puts the demo project in the gallery on the very first launch. */
-    private fun seedDemo(): List<ProjectInfo> {
-        val flag = File(getApplication<Application>().filesDir, "seeded")
+    /** Earlier builds put a lip-sync demo in the gallery; take it out once. */
+    private fun removeDemo(): List<ProjectInfo> {
+        val flag = File(getApplication<Application>().filesDir, "demo-removed")
         if (!flag.exists()) {
-            runCatching {
-                val demo = com.spideranim.model.Demo.project()
-                store.save(demo)
-                Exporter.writeThumbnail(demo, store.thumbnail(demo.id))
-            }
-            flag.writeText("1")
+            store.list().filter { it.name == "Lip Sync Demo" }.forEach { store.delete(it.id) }
+            runCatching { flag.writeText("1") }
         }
         return store.list()
     }
@@ -708,9 +704,10 @@ class Editor(app: Application) : AndroidViewModel(app) {
         selProp = Prop.Time
     }
 
-    fun addMarker(at: Int = frame) {
+    fun addMarker(at: Int = frame): Marker {
         val m = Marker(from = at, to = at, comment = "Marker ${clip.markers.size + 1}", color = MarkerColors[clip.markers.size % MarkerColors.size])
         editClip { it.copy(markers = (it.markers + m).sortedBy { x -> x.from }) }
+        return m
     }
 
     fun updateMarker(m: Marker) {

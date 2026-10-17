@@ -93,9 +93,10 @@ object Edits {
     // ------------------------------------------------------------------ symbols
 
     fun newSymbol(p: Project, name: String): Pair<Project, Clip> {
+        // Starts one frame long and grows as drawings are added, so it loops only what's drawn.
         val sym = Clip(
             name = name,
-            length = p.fps,
+            length = 1,
             layers = listOf(Layer(name = "Drawing 1", type = LayerType.Drawing)),
         )
         return p.copy(symbols = p.symbols + sym) to sym

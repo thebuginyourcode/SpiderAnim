@@ -64,7 +64,7 @@ tap_by text "Scene 1"
 tap_by text "Library"
 tap_by text "Symbol 1"
 shot tablet-3-placed
-tap_by text "Markers"
+tap_by text "Markers" 1
 shot tablet-4-markers
 tap_by text "Marker 2"
 tap_by content-desc "Play"

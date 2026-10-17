@@ -1,53 +1,38 @@
 # SpiderAnim
 
-A 2D animation app for Android phones and tablets that combines Toonsquid's calm, touch-first
-feel with Adobe Animate's tools and vocabulary. Native Kotlin + Jetpack Compose. Everything
-is vector.
+A 2D animation app for Android phones and tablets, modelled on ToonSquid's layout and
+workflow. Native Kotlin + Jetpack Compose. Everything is vector.
+
+## Layout
+
+- **Sidebar** (right edge): colour, the six tools, size and opacity bars, and the inspector
+  toggle. Tap the active tool again to open its options.
+- **Inspector**: switches between **Layer** (transform, easing curve, track colour, symbol)
+  and **Drawing** (the symbol's drawings and their markers).
+- **Frame picker**: a strip of chips above the timeline, one per drawing of the selected layer,
+  each labelled with its marker. Tap one to show that drawing from the playhead on. Long-press
+  a chip to name its marker, change its colour, duplicate it or delete it.
+- **Timeline**: a playback bar on top, timeline markers above the frame numbers, and one row per
+  layer. Each row shows keyframe diamonds, and below them the frame picks as coloured blocks
+  named by marker. Drag a diamond or a block to retime it. The chevron collapses the timeline.
+
+On phones the sidebar floats over the stage and the inspector opens as a bottom sheet.
 
 ## Concepts
 
-| SpiderAnim | Like in Animate | Like in Toonsquid |
-| --- | --- | --- |
-| **Symbol**: a reusable drawing with one or more drawings inside | Graphic symbol | Object |
-| **Symbols** panel: create, place, swap, duplicate, rename | Library | Objects list |
-| **Symbol Picker**: choose which of a symbol's drawings shows on each keyframe | Frame Picker | Frame picker |
-| **Layer**: one symbol instance with its own keyframes | Layer + instance | Object track |
-| **Keyframe**: position, scale, rotation, opacity and the picked drawing | Classic tween keyframe | Keyframe |
-| **Curves**: cubic-bezier ease on each tween, with presets | Ease / Motion Editor | Curves |
-
-Edits to a symbol show up in every instance of it. Moving or transforming a layer between keys
-adds a key on the current frame (auto-key).
+- **Symbol**: a reusable drawing made of one or more drawings. Every layer shows a symbol.
+- **Marker on a drawing**: a name such as "A", "O" or "Blink". The frame picker picks drawings
+  by these names, which makes lip sync a matter of scrubbing and tapping.
+- **Frame pick**: a key on the layer's frame track that says which drawing shows from that frame on.
+- **Keyframe**: position, scale, rotation and opacity. Moving something between keys adds a key.
+- **Timeline marker**: a comment, a colour and a From/To frame range, shown above the frame numbers.
 
 ## Tools
 
-Grouped like Animate's Tools panel. The letter is the Animate shortcut each one mirrors.
-
-- **Selection (V)**: tap to select, drag to move.
-- **Free Transform (Q)**: corner handles scale, side handles stretch, the top knob rotates.
-- **Brush (B)**: pressure-sensitive with a stylus, tapered ends, adjustable smoothing.
-- **Pencil (Y)**: constant-width line.
-- **Pen (P)**: tap to place points; tap the first point to close the shape, or the last point to finish.
-- **Line (N)**, **Rectangle (R)**, **Oval (O)**: with optional fill.
-- **Paint Bucket (K)**: fills closed shapes, and strokes whose ends nearly meet.
-- **Eraser (E)**: vector eraser that cuts strokes where it touches them.
-- **Eyedropper (I)**: picks up stroke or fill colour.
-- **Hand (H)**, **Zoom (Z)**.
+Transform, Brush (Ink or Pencil, stylus pressure, smoothing), Eraser (vector, cuts strokes),
+Fill (closes small gaps), Shape (line, rectangle, ellipse, polygon) and Eyedropper.
 
 Gestures: two fingers pan and pinch-zoom; a two-finger tap undoes; a three-finger tap redoes.
-
-## Timeline
-
-Play/pause, previous/next keyframe, onion skin, loop, fps and length. Tap a cell to jump there,
-drag the ruler to scrub, drag a keyframe dot to retime it. Tween spans are tinted. A white pip on a
-keyframe means the Symbol Picker changes drawing there. The selected layer's motion path is drawn
-on stage.
-
-## Layouts
-
-- **Tablet** (≥ 720 × 520 dp): floating tool rail, a right-hand panel with tabs (Properties,
-  Symbols, Picker, Curves) and a full-width timeline.
-- **Phone**: a scrollable tool strip, a compact timeline that collapses, and the panels in a
-  bottom sheet.
 
 ## Saving and export
 

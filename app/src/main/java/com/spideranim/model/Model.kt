@@ -370,3 +370,11 @@ fun Project.clipBounds(clip: Clip, frame: Int, depth: Int = 0): Bounds? {
     }
     return out
 }
+
+/** Union of [clip]'s content over all its frames (stable framing for thumbnails). */
+fun Project.clipBoundsAll(clip: Clip): Bounds? {
+    var out: Bounds? = null
+    val step = (clip.length / 120).coerceAtLeast(1)
+    for (f in 0 until clip.length step step) out = clipBounds(clip, f)?.union(out) ?: out
+    return out
+}

@@ -231,16 +231,19 @@ private fun ContextControls(ed: Editor, compact: Boolean) {
 
 @Composable
 private fun LeftToolbar(ed: Editor, compact: Boolean) {
-    val b = if (compact) 44.dp else 56.dp
-    Column(
-        Modifier.fillMaxHeight().width(if (compact) 50.dp else 64.dp).verticalScroll(rememberScrollState()).padding(vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
-    ) {
-        Tool.entries.forEach { t ->
-            Box {
-                BarButton(t.icon(), { ed.selectTool(t) }, selected = ed.tool == t, size = b, iconSize = if (compact) 24.dp else 30.dp, description = t.label)
-                if (ed.toolOptions == t) ToolPopover(ed, t)
+    BoxWithConstraints(Modifier.fillMaxHeight().width(if (compact) 50.dp else 64.dp)) {
+        // Shrink the buttons so all eight tools fit beside the canvas.
+        val b = minOf(if (compact) 44.dp else 56.dp, maxHeight / Tool.entries.size - 4.dp).coerceAtLeast(32.dp)
+        Column(
+            Modifier.fillMaxHeight().fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Tool.entries.forEach { t ->
+                Box {
+                    BarButton(t.icon(), { ed.selectTool(t) }, selected = ed.tool == t, size = b, iconSize = minOf(b * 0.55f, 30.dp), description = t.label)
+                    if (ed.toolOptions == t) ToolPopover(ed, t)
+                }
             }
         }
     }

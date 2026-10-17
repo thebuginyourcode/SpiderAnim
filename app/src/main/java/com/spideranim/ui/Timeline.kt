@@ -216,6 +216,7 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
             Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .clipToBounds()
                 .pointerInput(ed, cellPx, hasMarkers) {
                     val markerPx = if (hasMarkers) MarkerH.toPx() else 0f
                     awaitEachGesture {
@@ -314,6 +315,7 @@ private fun TimelineGrid(ed: Editor, compact: Boolean) {
             Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .clipToBounds()
                 .onSizeChanged {
                     gridW = it.width.toFloat()
                     gridH = it.height.toFloat()

@@ -61,6 +61,7 @@ import com.spideranim.model.Project
 import com.spideranim.model.Prop
 import com.spideranim.model.V2
 import com.spideranim.model.clipBounds
+import com.spideranim.model.clipBoundsAll
 import com.spideranim.model.strokeBounds
 import com.spideranim.ui.icons.Ic
 import com.spideranim.ui.theme.Ui
@@ -184,8 +185,9 @@ fun LayerThumb(ed: Editor, l: Layer, modifier: Modifier) {
 /** A symbol at [frame], fitted to the box, on the stage colour. */
 @Composable
 fun ClipThumb(p: Project, clip: Clip, frame: Int, modifier: Modifier) {
+    val bounds = remember(p, clip) { p.clipBoundsAll(clip) }
     Canvas(modifier.background(Color(p.background))) {
-        drawFitted(p.clipBounds(clip, frame), size.minDimension * 0.08f) { drawClip(p, clip, frame) }
+        drawFitted(bounds, size.minDimension * 0.1f) { drawClip(p, clip, frame) }
     }
 }
 

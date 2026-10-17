@@ -43,17 +43,22 @@ sleep 1
 tap_by text "Mouth"
 tap_by content-desc "Properties"
 shot tablet-2-properties
-tap_by text "Time"
+tap_by text "Markers"
 shot tablet-3-markers
 tap_by text "O"
 tap_by content-desc "Play"
 sleep 3
 tap_by content-desc "Play"
+tap_by content-desc "Properties"
+tap_by text "Mouth"
 tap_by text "Edit Symbol"
 shot tablet-4-in-symbol
+adb shell input swipe 1100 500 1400 520 300
+tap_by text "Add Drawing"
+shot tablet-5-new-drawing
 tap_by text "Scene 1"
 tap_by text "Library"
-shot tablet-5-library
+shot tablet-6-library
 tap_by text "Actions"
 tap_by text "Export GIF"
 sleep 25

@@ -55,6 +55,6 @@ CI builds debug and release APKs on every push. They are attached to the workflo
 - `model/`: immutable project model (symbols, drawings, layers, keyframes, eases), geometry and JSON.
 - `editor/EditorState.kt`: the ViewModel. Undo/redo, tools, every edit operation, autosave, export.
 - `ui/Stage.kt`: stage rendering, gestures and tool behaviour.
-- `ui/Timeline.kt`, `ui/Panels.kt`, `ui/Tools.kt`, `ui/EditorScreen.kt`: the interface.
+- `ui/Sidebar.kt`, `ui/Inspector.kt`, `ui/FramePicker.kt`, `ui/Timeline.kt`, `ui/EditorScreen.kt`: the interface.
 - `ui/icons/Ic.kt`: the line icon set, drawn on a 24-unit grid.
 - `export/`: GIF89a writer, LZW encoder and palette quantiser.
